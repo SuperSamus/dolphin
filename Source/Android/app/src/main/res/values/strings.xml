@@ -375,6 +375,10 @@
     <string name="main_mem1_size">MEM1 Size</string>
     <string name="main_mem2_size">MEM2 Size</string>
     <string name="gpu_options">GPU Options</string>
+    <string name="vi_overclock_enable">Override VI Clock Speed</string>
+    <string name="vi_overclock_enable_description">Higher values may make games run at a higher framerate without changing audio, which MAY impact game speed. Lower values MAY activate a game's internal frameskip, potentially improving performance.</string>
+    <string name="vi_overclock_title">Emulated VI Clock Speed</string>
+    <string name="vi_overclock_title_description">Adjusts the emulated VI clock rate if \"Override VI Clock Speed\" is enabled.</string>
     <string name="synchronize_gpu_thread">Synchronize GPU Thread</string>
     <string name="synchronize_gpu_thread_description">Synchronizing the GPU thread reduces the risk of games crashing or becoming unstable with dual core enabled, but can also reduce the performance gain of dual core. If unsure, select \"On Idle Skipping\". Selecting \"Never\" is risky and not recommended!</string>
     <string name="custom_rtc_options">Custom RTC Options</string>
