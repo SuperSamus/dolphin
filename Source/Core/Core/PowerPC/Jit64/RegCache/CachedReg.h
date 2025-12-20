@@ -13,6 +13,7 @@
 
 using preg_t = size_t;
 
+// A struct representing the state of a PPC register
 class PPCCachedReg
 {
 public:
@@ -20,56 +21,79 @@ public:
 
   explicit PPCCachedReg(Gen::OpArg default_location) : m_default_location(default_location) {}
 
+  // Get where the register is stored in memory.
   Gen::OpArg GetDefaultLocation() const { return m_default_location; }
 
-  Gen::X64Reg GetHostRegister() const
-  {
-    ASSERT(m_in_host_register);
-    return m_host_register;
-  }
+  // Get the host register in which this PPC register is bound to.
+  std::optional<Gen::X64Reg> GetHostRegister() const { return m_host_register; }
 
+  // Does the value stored in memory correspond the real value of the register?
   bool IsInDefaultLocation() const { return m_in_default_location; }
-  bool IsInHostRegister() const { return m_in_host_register; }
+  // Is this register bound to a host register?
+  bool IsInHostRegister() const { return m_host_register.has_value(); }
 
+  // Claim that this register has been flushed to memory.
   void SetFlushed(bool maintain_host_register)
   {
+    // When a transaction is in progress, allowing the store would overwrite the old value.
     ASSERT(!m_revertable);
     if (!maintain_host_register)
-      m_in_host_register = false;
+    {
+      ASSERT(!IsLocked());
+      m_host_register = std::nullopt;
+    }
     m_in_default_location = true;
   }
 
+  // Bind this register to a host register.
   void SetInHostRegister(Gen::X64Reg xreg, bool dirty)
   {
+    ASSERT(!IsInHostRegister());
+    ASSERT(!m_revertable);
     if (dirty)
       m_in_default_location = false;
-    m_in_host_register = true;
     m_host_register = xreg;
   }
 
-  void SetDirty() { m_in_default_location = false; }
+  // Claim that the value in memory now isn't accurate, but the value of the host register is.
+  void SetDirty()
+  {
+    ASSERT(IsInHostRegister());
+    m_in_default_location = false;
+  }
 
+  // Unbind the host register, despite its value not being flushed to memory.
+  // Do this when it's known that the register will be written to before being read.
   void SetDiscarded()
   {
+    ASSERT(!IsLocked());
     ASSERT(!m_revertable);
     m_in_default_location = false;
-    m_in_host_register = false;
+    m_host_register = std::nullopt;
   }
 
+  // Is the value of the register staged to be reverted in case of a load error?
   bool IsRevertable() const { return m_revertable; }
+
+  // In case of a load exception, stage the register to potentially be reverted.
   void SetRevertable()
   {
-    ASSERT(m_in_host_register);
+    ASSERT(m_host_register.has_value());
     m_revertable = true;
   }
+  // There has been an exception in loading a value: set the correct value to the one stored in
+  // memory, and unbind the host register.
   void SetRevert()
   {
+    ASSERT(!IsLocked());
     ASSERT(m_revertable);
     m_revertable = false;
     SetFlushed(false);
   }
+  // Loading a value has been successful, continue normally.
   void SetCommit()
   {
+    ASSERT(!IsLocked());
     ASSERT(m_revertable);
     m_revertable = false;
   }
@@ -84,9 +108,8 @@ public:
 
 private:
   Gen::OpArg m_default_location{};
-  Gen::X64Reg m_host_register{};
+  std::optional<Gen::X64Reg> m_host_register{};
   bool m_in_default_location = true;
-  bool m_in_host_register = false;
   bool m_revertable = false;
   size_t m_locked = 0;
 };
@@ -94,21 +117,21 @@ private:
 class X64CachedReg
 {
 public:
-  preg_t Contents() const { return ppcReg; }
+  std::optional<preg_t> Contents() const { return ppcReg; }
 
   void SetBoundTo(preg_t ppcReg_)
   {
-    free = false;
+    ASSERT(!ppcReg.has_value());
     ppcReg = ppcReg_;
   }
 
   void Unbind()
   {
-    ppcReg = static_cast<preg_t>(Gen::INVALID_REG);
-    free = true;
+    ASSERT(!IsLocked() && ppcReg.has_value());
+    ppcReg = std::nullopt;
   }
 
-  bool IsFree() const { return free && !locked; }
+  bool IsFree() const { return !ppcReg.has_value() && !locked; }
 
   bool IsLocked() const { return locked > 0; }
   void Lock() { locked++; }
@@ -119,8 +142,7 @@ public:
   }
 
 private:
-  preg_t ppcReg = static_cast<preg_t>(Gen::INVALID_REG);
-  bool free = true;
+  std::optional<preg_t> ppcReg = std::nullopt;
   size_t locked = 0;
 };
 

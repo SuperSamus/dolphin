@@ -179,8 +179,8 @@ public:
   void Flush(BitSet32 pregs = BitSet32::AllTrue(32),
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
   void Reset(BitSet32 pregs);
-  void Revert();
-  void Commit();
+  void RevertStaged();
+  void CommitStaged();
 
   bool IsAllUnlocked() const;
 
@@ -223,6 +223,8 @@ protected:
   void LockX(Gen::X64Reg xr);
   void UnlockX(Gen::X64Reg xr);
   bool IsRealized(preg_t preg) const;
+  // Considering the constraints given to the PPC register, do what's necessary to make it usable in
+  // x86 instructions.
   void Realize(preg_t preg);
 
   bool IsAnyConstraintActive() const;

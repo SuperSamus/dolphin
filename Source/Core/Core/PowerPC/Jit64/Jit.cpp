@@ -1191,8 +1191,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         RCForkGuard gpr_guard = gpr.Fork();
         RCForkGuard fpr_guard = fpr.Fork();
 
-        gpr.Revert();
-        fpr.Revert();
+        gpr.RevertStaged();
+        fpr.RevertStaged();
         gpr.Flush();
         fpr.Flush();
 
@@ -1201,8 +1201,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SwitchToNearCode();
       }
 
-      gpr.Commit();
-      fpr.Commit();
+      gpr.CommitStaged();
+      fpr.CommitStaged();
 
       // If we have a register that will never be used again, discard or flush it.
       if (!bJITRegisterCacheOff)
