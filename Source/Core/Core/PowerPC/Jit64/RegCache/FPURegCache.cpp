@@ -34,7 +34,7 @@ OpArg FPURegCache::R(preg_t preg) const
 {
   if (m_regs[preg].IsInHostRegister())
   {
-    return ::Gen::R(m_regs[preg].GetHostRegister());
+    return ::Gen::R(m_regs[preg].GetHostRegister().value());
   }
   else
   {
@@ -48,7 +48,7 @@ void FPURegCache::StoreRegister(preg_t preg, const OpArg& new_loc,
 {
   if (m_regs[preg].IsInHostRegister())
   {
-    m_emitter->MOVAPD(new_loc, m_regs[preg].GetHostRegister());
+    m_emitter->MOVAPD(new_loc, m_regs[preg].GetHostRegister().value());
   }
   else
   {

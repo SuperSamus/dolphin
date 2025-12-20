@@ -34,7 +34,7 @@ OpArg GPRRegCache::R(preg_t preg) const
 {
   if (m_regs[preg].IsInHostRegister())
   {
-    return ::Gen::R(m_regs[preg].GetHostRegister());
+    return ::Gen::R(m_regs[preg].GetHostRegister().value());
   }
   else if (m_jit.GetConstantPropagation().HasGPR(preg))
   {
@@ -52,7 +52,7 @@ void GPRRegCache::StoreRegister(preg_t preg, const OpArg& new_loc,
 {
   if (m_regs[preg].IsInHostRegister())
   {
-    m_emitter->MOV(32, new_loc, ::Gen::R(m_regs[preg].GetHostRegister()));
+    m_emitter->MOV(32, new_loc, ::Gen::R(m_regs[preg].GetHostRegister().value()));
   }
   else if (m_jit.GetConstantPropagation().HasGPR(preg))
   {
