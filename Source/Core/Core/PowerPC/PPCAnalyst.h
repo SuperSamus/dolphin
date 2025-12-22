@@ -26,6 +26,13 @@ class CPUThreadGuard;
 
 namespace PPCAnalyst
 {
+enum class BranchKind
+{
+  Normal,
+  Followed,
+  IdleLoop,
+};
+
 struct CodeOp  // 16B
 {
   UGeckoInstruction inst;
@@ -38,8 +45,7 @@ struct CodeOp  // 16B
   s8 fregOut = 0;
   BitSet8 crIn;
   BitSet8 crOut;
-  bool branchUsesCtr = false;
-  bool branchIsIdleLoop = false;
+  BranchKind branchKind = {};
   BitSet8 wantsCR;
   bool wantsFPRF = false;
   bool wantsCA = false;
