@@ -119,7 +119,9 @@ void JitArm64::bx(UGeckoInstruction inst)
     STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF_SPR(SPR_LR));
   }
 
-  if (!js.isLastInstruction)
+  // PPCAnalyzer::Analyze() followed the next instruction of the block to the destination of the
+  // branch, no need to do anything.
+  if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
   {
     if (IsBranchWatchEnabled())
     {
@@ -143,7 +145,7 @@ void JitArm64::bx(UGeckoInstruction inst)
   gpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
   fpr.Flush(FlushMode::All, ARM64Reg::INVALID_REG);
 
-  if (js.op->branchIsIdleLoop)
+  if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
   {
     if (IsBranchWatchEnabled())
     {
@@ -179,9 +181,6 @@ void JitArm64::bcx(UGeckoInstruction inst)
   JITDISABLE(bJITBranchOff);
 
   auto WA = gpr.GetScopedReg();
-  // If WA isn't needed for WriteExit, it can be safely clobbered.
-  auto WB = (inst.LK && !js.op->branchIsIdleLoop) ? gpr.GetScopedReg() :
-                                                    Arm64GPRCache::ScopedARM64Reg(WA.GetReg());
 
   {
     FixupBranch pCTRDontBranch;
@@ -211,6 +210,33 @@ void JitArm64::bcx(UGeckoInstruction inst)
       STR(IndexType::Unsigned, WA, PPC_REG, PPCSTATE_OFF_SPR(SPR_LR));
     }
 
+    // PPCAnalyzer::Analyze() found that this branch is unconditional and thus followed the next
+    // instruction of the block to the destination of the branch, no need to do anything.
+    if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
+    {
+      if (IsBranchWatchEnabled())
+      {
+        BitSet32 gpr_caller_save = gpr.GetCallerSavedUsed();
+        if (WA != ARM64Reg::INVALID_REG && js.op->skipLRStack)
+          gpr_caller_save[DecodeReg(WA)] = false;
+        WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save,
+                               fpr.GetCallerSavedUsed());
+      }
+      if (inst.LK && !js.op->skipLRStack)
+      {
+        // We have to fake the stack as the RET instruction was not
+        // found in the same block. This is a big overhead, but still
+        // better than calling the dispatcher.
+        FakeLKExit(js.compilerPC + 4, WA);
+      }
+      return;
+    }
+
+    // If WA isn't needed for WriteExit, it can be safely clobbered.
+    auto WB = (inst.LK && js.op->branchKind != PPCAnalyst::BranchKind::IdleLoop) ?
+                  gpr.GetScopedReg() :
+                  Arm64GPRCache::ScopedARM64Reg(WA.GetReg());
+
     gpr.Flush(FlushMode::MaintainState, WB);
     fpr.Flush(FlushMode::MaintainState, ARM64Reg::INVALID_REG);
 
@@ -220,7 +246,7 @@ void JitArm64::bcx(UGeckoInstruction inst)
       WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, gpr_caller_save,
                              fpr.GetCallerSavedUsed());
     }
-    if (js.op->branchIsIdleLoop)
+    if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
     {
       // make idle loops go faster
       ARM64Reg XA = EncodeRegTo64(WA);
@@ -357,19 +383,20 @@ void JitArm64::bclrx(UGeckoInstruction inst)
       if (conditional)
       {
         gpr_caller_save = gpr.GetCallerSavedUsed();
-        if (js.op->branchIsIdleLoop)
+        if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
           gpr_caller_save[DecodeReg(WA)] = false;
         fpr_caller_save = fpr.GetCallerSavedUsed();
       }
       else
       {
-        gpr_caller_save =
-            js.op->branchIsIdleLoop ? BitSet32{} : BitSet32{DecodeReg(WA)} & CALLER_SAVED_GPRS;
+        gpr_caller_save = js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop ?
+                              BitSet32{} :
+                              BitSet32{DecodeReg(WA)} & CALLER_SAVED_GPRS;
         fpr_caller_save = {};
       }
       WriteBranchWatchDestInRegister(js.compilerPC, WA, inst, gpr_caller_save, fpr_caller_save);
     }
-    if (js.op->branchIsIdleLoop)
+    if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
     {
       // make idle loops go faster
       ARM64Reg XA = EncodeRegTo64(WA);

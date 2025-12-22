@@ -111,15 +111,14 @@ void Jit64::bx(UGeckoInstruction inst)
   INSTRUCTION_START
   JITDISABLE(bJITBranchOff);
 
-  // We must always process the following sentence
-  // even if the blocks are merged by PPCAnalyst::Flatten().
+  // We must always process the following sentence, even if branch following is inlining the
+  // function call.
   if (inst.LK)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
-  // If this is not the last instruction of a block,
-  // we will skip the rest process.
-  // Because PPCAnalyst::Flatten() merged the blocks.
-  if (!js.isLastInstruction)
+  // PPCAnalyzer::Analyze() followed the next instruction of the block to the destination of the
+  // branch, no need to do anything.
+  if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
   {
     WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
     if (inst.LK && !js.op->skipLRStack)
@@ -140,7 +139,7 @@ void Jit64::bx(UGeckoInstruction inst)
   if (inst.LK)
     AND(32, PPCSTATE(cr), Imm32(~(0xFF000000)));
 #endif
-  if (js.op->branchIsIdleLoop)
+  if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
   {
     WriteIdleExit(js.op->branchTo);
   }
@@ -180,11 +179,9 @@ void Jit64::bcx(UGeckoInstruction inst)
   if (inst.LK)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
-  // If this is not the last instruction of a block
-  // and an unconditional branch, we will skip the rest process.
-  // Because PPCAnalyst::Flatten() merged the blocks.
-  if (!js.isLastInstruction && (inst.BO & BO_DONT_DECREMENT_FLAG) &&
-      (inst.BO & BO_DONT_CHECK_CONDITION))
+  // PPCAnalyzer::Analyze() found that this branch is unconditional and thus followed the next
+  // instruction of the block to the destination of the branch, no need to do anything.
+  if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
   {
     WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
     if (inst.LK && !js.op->skipLRStack)
@@ -204,7 +201,7 @@ void Jit64::bcx(UGeckoInstruction inst)
     fpr.Flush();
 
     WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
-    if (js.op->branchIsIdleLoop)
+    if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
     {
       WriteIdleExit(js.op->branchTo);
     }
@@ -333,7 +330,7 @@ void Jit64::bclrx(UGeckoInstruction inst)
     gpr.Flush();
     fpr.Flush();
 
-    if (js.op->branchIsIdleLoop)
+    if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
     {
       WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
       WriteIdleExit(js.op->branchTo);
