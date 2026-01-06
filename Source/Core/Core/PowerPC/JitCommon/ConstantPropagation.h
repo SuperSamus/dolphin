@@ -60,6 +60,8 @@ public:
 
   u32 GetGPR(size_t gpr) const { return m_gpr_values[gpr]; }
 
+  BitSet32 GetAllGPR() const { return m_gpr_values_known; }
+
   void SetGPR(size_t gpr, u32 value)
   {
     m_gpr_values_known[gpr] = true;

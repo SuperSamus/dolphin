@@ -1,6 +1,7 @@
 // Copyright 2008 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <variant>
 #include "Core/PowerPC/Jit64/Jit.h"
 
 #include "Common/Assert.h"
@@ -11,6 +12,7 @@
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
+#include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/PPCAnalyst.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "Core/System.h"
@@ -131,6 +133,25 @@ void Jit64::bx(UGeckoInstruction inst)
     return;
   }
 
+  auto in_block_branch = TryInBlockBranch(*js.op);
+  if (!inst.LK && !std::holds_alternative<std::monostate>(in_block_branch))
+  {
+    if (std::holds_alternative<FixupBranch*>(in_block_branch))
+    {
+      SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+      FixupBranch* fixup = std::get<FixupBranch*>(in_block_branch);
+      *fixup = J(Jump::Near);
+      js.downcountAmount = 0;
+    }
+    if (std::holds_alternative<const u8*>(in_block_branch))
+    {
+      const u8* dest = std::get<const u8*>(in_block_branch);
+      WriteInBlockExit(js.op->branchTo);
+      JMP(dest);
+    }
+    return;
+  }
+
   gpr.Flush();
   fpr.Flush();
 
@@ -159,71 +180,117 @@ void Jit64::bcx(UGeckoInstruction inst)
 
   // USES_CR
 
-  FixupBranch pCTRDontBranch;
-  if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
+  auto in_block_branch = TryInBlockBranch(*js.op);
+  if (inst.LK || std::holds_alternative<std::monostate>(in_block_branch))
   {
-    SUB(32, PPCSTATE_CTR, Imm8(1));
-    if (inst.BO & BO_BRANCH_IF_CTR_0)
-      pCTRDontBranch = J_CC(CC_NZ, Jump::Near);
-    else
-      pCTRDontBranch = J_CC(CC_Z, Jump::Near);
-  }
-
-  FixupBranch pConditionDontBranch;
-  if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)  // Test a CR bit
-  {
-    pConditionDontBranch =
-        JumpIfCRFieldBit(inst.BI >> 2, 3 - (inst.BI & 3), !(inst.BO_2 & BO_BRANCH_IF_TRUE));
-  }
-
-  if (inst.LK)
-    MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
-
-  // PPCAnalyzer::Analyze() found that this branch is unconditional and thus followed the next
-  // instruction of the block to the destination of the branch, no need to do anything.
-  if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
-  {
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
-    if (inst.LK && !js.op->skipLRStack)
+    FixupBranch pCTRDontBranch;
+    if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
     {
-      // We have to fake the stack as the RET instruction was not
-      // found in the same block. This is a big overhead, but still
-      // better than calling the dispatcher.
-      FakeBLCall(js.compilerPC + 4);
+      SUB(32, PPCSTATE_CTR, Imm8(1));
+      if (inst.BO & BO_BRANCH_IF_CTR_0)
+        pCTRDontBranch = J_CC(CC_NZ, Jump::Near);
+      else
+        pCTRDontBranch = J_CC(CC_Z, Jump::Near);
     }
-    return;
-  }
 
-  {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
-    gpr.Flush();
-    fpr.Flush();
-
-    WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
-    if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
+    FixupBranch pConditionDontBranch;
+    if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)  // Test a CR bit
     {
-      WriteIdleExit(js.op->branchTo);
+      pConditionDontBranch =
+          JumpIfCRFieldBit(inst.BI >> 2, 3 - (inst.BI & 3), !(inst.BO_2 & BO_BRANCH_IF_TRUE));
     }
-    else
+
+    if (inst.LK)
+      MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
+
+    // PPCAnalyzer::Analyze() found that this branch is unconditional and thus followed the next
+    // instruction of the block to the destination of the branch, no need to do anything.
+    if (js.op->branchKind == PPCAnalyst::BranchKind::Followed)
     {
-      WriteExit(js.op->branchTo, inst.LK, js.compilerPC + 4);
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, CallerSavedRegistersInUse());
+      if (inst.LK && !js.op->skipLRStack)
+      {
+        // We have to fake the stack as the RET instruction was not
+        // found in the same block. This is a big overhead, but still
+        // better than calling the dispatcher.
+        FakeBLCall(js.compilerPC + 4);
+      }
+      return;
+    }
+
+    {
+      RCForkGuard gpr_guard = gpr.Fork();
+      RCForkGuard fpr_guard = fpr.Fork();
+      gpr.Flush();
+      fpr.Flush();
+
+      WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
+      if (js.op->branchKind == PPCAnalyst::BranchKind::IdleLoop)
+      {
+        WriteIdleExit(js.op->branchTo);
+      }
+      else
+      {
+        WriteExit(js.op->branchTo, inst.LK, js.compilerPC + 4);
+      }
+    }
+
+    if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)
+      SetJumpTarget(pConditionDontBranch);
+    if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)
+      SetJumpTarget(pCTRDontBranch);
+
+    if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
+    {
+      gpr.Flush();
+      fpr.Flush();
+      WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {});
+      WriteExit(js.compilerPC + 4);
+    }
+    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, CallerSavedRegistersInUse());
+  }
+  else
+  {
+    if (std::holds_alternative<FixupBranch*>(in_block_branch))
+    {
+      SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+      FixupBranch* fixup = std::get<FixupBranch*>(in_block_branch);
+      if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)  // Test a CR bit
+      {
+        *fixup = JumpIfCRFieldBit(inst.BI >> 2, 3 - (inst.BI & 3), inst.BO_2 & BO_BRANCH_IF_TRUE);
+      }
+      else if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
+      {
+        SUB(32, PPCSTATE_CTR, Imm8(1));
+        if (inst.BO & BO_BRANCH_IF_CTR_0)
+          *fixup = J_CC(CC_Z, Jump::Near);
+        else
+          *fixup = J_CC(CC_NZ, Jump::Near);
+      }
+      js.downcountAmount = 0;
+    }
+    else if (std::holds_alternative<const u8*>(in_block_branch))
+    {
+      const u8* destination = std::get<const u8*>(in_block_branch);
+      FixupBranch pDontBranch;
+      if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)  // Test a CR bit
+      {
+        pDontBranch =
+            JumpIfCRFieldBit(inst.BI >> 2, 3 - (inst.BI & 3), !(inst.BO_2 & BO_BRANCH_IF_TRUE));
+      }
+      else if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)  // Decrement and test CTR
+      {
+        SUB(32, PPCSTATE_CTR, Imm8(1));
+        if (inst.BO & BO_BRANCH_IF_CTR_0)
+          pDontBranch = J_CC(CC_NZ);
+        else
+          pDontBranch = J_CC(CC_Z);
+      }
+      WriteInBlockExit(js.op->branchTo);
+      JMP(destination);
+      SetJumpTarget(pDontBranch);
     }
   }
-
-  if ((inst.BO & BO_DONT_CHECK_CONDITION) == 0)
-    SetJumpTarget(pConditionDontBranch);
-  if ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0)
-    SetJumpTarget(pCTRDontBranch);
-
-  if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
-  {
-    gpr.Flush();
-    fpr.Flush();
-    WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, {});
-    WriteExit(js.compilerPC + 4);
-  }
-  WriteBranchWatch<false>(js.compilerPC, js.compilerPC + 4, inst, CallerSavedRegistersInUse());
 }
 
 void Jit64::bcctrx(UGeckoInstruction inst)

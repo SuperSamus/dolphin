@@ -247,6 +247,8 @@ bool PPCAnalyzer::CanSwapAdjacentOps(const CodeOp& a, const CodeOp& b) const
     return false;
   if (a.canEndBlock || b.canEndBlock)
     return false;
+  if (a.isBranchTarget || b.isBranchTarget)
+    return false;
   if (a_flags & (FL_TIMER | FL_NO_REORDER | FL_SET_OE))
     return false;
   if (b_flags & (FL_TIMER | FL_NO_REORDER | FL_SET_OE))
@@ -738,10 +740,9 @@ static bool DoesBranchUseCtr(CodeOp* code)
 bool PPCAnalyzer::IsBusyWaitLoop(CodeBlock* block, CodeOp* code, size_t instructions) const
 {
   // Very basic algorithm to detect busy wait loops:
-  //   * It loops to itself and does not contain any other branches.
+  //   * It loops to itself.
   //   * It does not write to memory.
-  //   * It only reads from registers it wrote to earlier in the loop, or it
-  //     does not write to these registers.
+  //   * If a register is read, then writing to it later is not allowed.
   //
   // Would benefit a lot from basic inlining support - a lot of the most
   // used busy loops are DSP register interactions, which are bl/cmp/bne
@@ -749,14 +750,23 @@ bool PPCAnalyzer::IsBusyWaitLoop(CodeBlock* block, CodeOp* code, size_t instruct
   // don't detect these at the moment.
   std::bitset<32> write_disallowed_regs;
   std::bitset<32> written_regs;
+  bool found_other_branch = false;
+  bool found_branch_target = false;
   for (size_t i = 0; i <= instructions; ++i)
   {
+    if (code[i].isBranchTarget)
+      found_branch_target = true;
+    if (found_branch_target && found_other_branch)
+      // Assume the worst with sheninigans that branch outside the "idle loop" and then back to it.
+      return false;
     if (code[i].opinfo->type == OpType::Branch)
     {
       if (DoesBranchUseCtr(&code[i]))
         return false;
       if (code[i].branchTo == block->m_address && i == instructions)
         return true;
+      else
+        found_other_branch = true;
     }
     else if (code[i].opinfo->type != OpType::Integer && code[i].opinfo->type != OpType::Load)
     {
@@ -798,6 +808,16 @@ static bool CanCauseGatherPipeInterruptCheck(const CodeOp& op)
          op.opinfo->type == OpType::StorePS;
 }
 
+static void CombineCodeOp(BranchInfo& bi, const CodeOp& op)
+{
+  bi.regsIn |= op.regsIn;
+  bi.regsOut |= op.regsOut;
+  bi.fregsIn |= op.fregsIn;
+  bi.fregsOut |= op.GetFregsOut();
+  bi.contains_flush_and_continue |=
+      IsMtspr(op.inst);  // TODO: Other things like hle or fallback to interpreter.
+}
+
 u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
                          std::size_t block_size) const
 {
@@ -817,6 +837,7 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
   block->m_num_instructions = 0;
   block->m_gqr_used = BitSet8(0);
   block->m_physical_addresses.clear();
+  block->m_branch_infos.clear();
 
   CodeOp* const code = buffer->data();
 
@@ -830,6 +851,7 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
 
   auto& system = Core::System::GetInstance();
   auto& mmu = system.GetMMU();
+  std::set<u32> visited_addresses;
   for (std::size_t i = 0; i < block_size; ++i)
   {
     auto result = mmu.TryReadInstruction(address);
@@ -851,6 +873,7 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     code[i].skip = false;
     block->m_stats->numCycles += opinfo->num_cycles;
     block->m_physical_addresses.insert(result.physical_address);
+    visited_addresses.insert(address);
 
     SetInstructionStats(block, &code[i], opinfo);
 
@@ -867,11 +890,18 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
       if (inst.OPCD == 18 && block_size > 1)
       {
         // Always follow BX instructions.
-        follow = true;
+        // TODO: Actually don't: they are often used in loops, wouldn't wanna mess with in-block
+        // branches. But there are smarter logics than "no".
         if (inst.LK)
         {
+          follow = true;
           found_call = true;
           caller = i;
+        }
+        else
+        {
+          // Like, just lie through your teeth, I wanna see!
+          conditional_continue = true;
         }
       }
       else if (inst.OPCD == 16 && (inst.BO & BO_DONT_DECREMENT_FLAG) &&
@@ -943,18 +973,20 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     if (code[i].branchTo == block->m_address && IsBusyWaitLoop(block, code, i))
       code[i].branchKind = BranchKind::IdleLoop;
 
+    u32 next_address;
     if (follow && code[i].branchKind != BranchKind::IdleLoop &&
         numFollows < BRANCH_FOLLOWING_THRESHOLD)
     {
       // Follow the unconditional branch.
       code[i].branchKind = BranchKind::Followed;
       numFollows++;
-      address = code[i].branchTo;
+      next_address = code[i].branchTo;
     }
     else
     {
       // Just pick the next instruction
-      address += 4;
+      next_address = address + 4;
+      // IMPORTANT TODO!!! HANDLE THIS WITH IN-BLOCK UNCONDITIONAL BRANCHES!!!
       if (!conditional_continue && InstructionCanEndBlock(code[i]))  // right now we stop early
       {
         found_exit = true;
@@ -967,7 +999,71 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
         found_call = false;
       }
     }
+    if (code[i].branchTo != UINT32_MAX && !code[i].inst.LK &&
+        code[i].branchKind == BranchKind::Normal)
+    {
+      BranchInfo bi;
+      if (code[i].address == code[i].branchTo)
+        bi.direction = BranchDirection::Outside;
+      else
+        bi.direction = visited_addresses.contains(code[i].branchTo) ? BranchDirection::Backward :
+                                                                      BranchDirection::Forward;
+      bi.address = code[i].address;
+      bi.branchTo = code[i].branchTo;
+      bi.address_i = i;
+      block->m_branch_infos.push_back(bi);
+    }
+    address = next_address;
   }
+
+  // Note that this is performed *before* reordering. Take this example:
+  // b+ ----
+  // ...   |
+  // cmp <--
+  // mr   # This is swapped with the above, but the branch doesn't skip it
+  // beq
+  for (BranchInfo& bi : block->m_branch_infos)
+  {
+    size_t i = bi.address_i;
+    if (!visited_addresses.contains(bi.branchTo))
+    {
+      bi.direction = BranchDirection::Outside;
+      continue;
+    }
+    else if (bi.direction == BranchDirection::Forward)
+    {
+      while (true)
+      {
+        if (code[i].address == bi.branchTo)
+          break;
+        CombineCodeOp(bi, code[i]);
+        ++i;
+      }
+    }
+    else if (bi.direction == BranchDirection::Backward)
+    {
+      while (true)
+      {
+        CombineCodeOp(bi, code[i]);
+        if (code[i].address == bi.branchTo)
+          break;
+        --i;
+      }
+    }
+
+    bi.branchTo_i = i;
+    code[i].isBranchTarget = true;
+  }
+
+  // Sort branches by which address/destination comes first.
+  std::ranges::sort(block->m_branch_infos, [](const auto& lhs, const auto& rhs) {
+    auto abs_diff = [](u32 a, u32 b) { return a > b ? a - b : b - a; };
+    if (std::min(lhs.address_i, lhs.branchTo_i) == std::min(rhs.address_i, rhs.branchTo_i))
+      // As secondary condition, prefer the shorter branch.
+      return abs_diff(lhs.address_i, lhs.branchTo_i) < abs_diff(rhs.address_i, rhs.branchTo_i);
+    else
+      return std::min(lhs.address_i, lhs.branchTo_i) < std::min(rhs.address_i, rhs.branchTo_i);
+  });
 
   block->m_num_instructions = num_inst;
 
@@ -991,6 +1087,7 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
   for (int i = block->m_num_instructions - 1; i >= 0; i--)
   {
     CodeOp& op = code[i];
+    op.i = i;  // Note that it's set after reordering
 
     if (CanCauseGatherPipeInterruptCheck(op))
     {

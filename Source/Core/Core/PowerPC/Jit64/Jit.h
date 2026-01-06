@@ -61,6 +61,21 @@ public:
   void EnableOptimization();
   void EnableBlockLink();
 
+  // Called in functions unrelated to branches, attempt to activate the "in-block branches mode".
+  // If possible, it sets all preparations and returns `true`.
+  bool TryPrepareInBlockBranches(const PPCAnalyst::CodeOp& op);
+  // Called in functions related to branches. If that branch cannot be in-block, return
+  // void. (This may happen even if the "in-block branches mode" is activated: maybe the
+  // branch points outside the block, or maybe that specific branch needs to preload too many
+  // registers and thus wasn't included.) Otherwise, return FixupBranch for forward branches (for
+  // the instruction to write to), or u8* for backwards branches, plus it sets preparations.
+  std::variant<std::monostate, FixupBranch*, const u8*>
+  TryInBlockBranch(const PPCAnalyst::CodeOp& op);
+  void EndInBlockBranch();
+  bool IsInBlockBranchActive();
+  // TODO: This shouldn't be here.
+  void ForcePreloadRegisters();
+
   // Jit!
 
   void Jit(u32 em_address) override;
@@ -103,6 +118,7 @@ public:
   void MSRUpdated(const Gen::OpArg& msr, Gen::X64Reg scratch_reg);
   void FakeBLCall(u32 after);
   void WriteExit(u32 destination, bool bl = false, u32 after = 0);
+  void WriteInBlockExit(u32 destination);
   void JustWriteExit(u32 destination, bool bl, u32 after);
   void WriteExitDestInRSCRATCH(bool bl = false, u32 after = 0);
   void WriteBLRExit();
@@ -144,6 +160,7 @@ public:
   // Generates a branch that will check if a given bit of a CR register part
   // is set or not.
   Gen::FixupBranch JumpIfCRFieldBit(int field, int bit, bool jump_if_set = true);
+  void JumpIfCRFieldBit(int field, int bit, const u8* destination, bool jump_if_set = true);
 
   void UpdateFPExceptionSummary(Gen::X64Reg fpscr, Gen::X64Reg tmp1, Gen::X64Reg tmp2);
 
@@ -275,6 +292,8 @@ public:
 
 private:
   void CompileInstruction(PPCAnalyst::CodeOp& op);
+
+  bool IsFallbackToInterpreter(UGeckoInstruction inst);
 
   bool HandleFunctionHooking(u32 address);
 

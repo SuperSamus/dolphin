@@ -585,6 +585,7 @@ if(_M_X86_64)
     PowerPC/Jit64/Jit_Branch.cpp
     PowerPC/Jit64/Jit_FloatingPoint.cpp
     PowerPC/Jit64/Jit_Integer.cpp
+    PowerPC/Jit64/Jit_InBlockBranch.cpp
     PowerPC/Jit64/Jit_LoadStore.cpp
     PowerPC/Jit64/Jit_LoadStoreFloating.cpp
     PowerPC/Jit64/Jit_LoadStorePaired.cpp

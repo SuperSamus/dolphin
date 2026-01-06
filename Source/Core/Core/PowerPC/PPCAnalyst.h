@@ -37,8 +37,9 @@ struct CodeOp  // 16B
 {
   UGeckoInstruction inst;
   const GekkoOPInfo* opinfo = nullptr;
+  size_t i = 0;
   u32 address = 0;
-  u32 branchTo = 0;  // if UINT32_MAX, not a branch
+  u32 branchTo = UINT32_MAX;  // if UINT32_MAX, not a branch
   BitSet32 regsIn;
   BitSet32 regsOut;
   BitSet32 fregsIn;
@@ -46,6 +47,7 @@ struct CodeOp  // 16B
   BitSet8 crIn;
   BitSet8 crOut;
   BranchKind branchKind = {};
+  bool isBranchTarget = false;
   BitSet8 wantsCR;
   bool wantsFPRF = false;
   bool wantsCA = false;
@@ -89,6 +91,31 @@ struct CodeOp  // 16B
 
     return result;
   }
+};
+
+enum class BranchDirection
+{
+  Outside,
+  Forward,
+  Backward,
+};
+
+struct BranchInfo
+{
+  BranchDirection direction{};
+  u32 address = 0;
+  u32 branchTo = 0;
+  std::size_t address_i = UINT32_MAX;
+  std::size_t branchTo_i = UINT32_MAX;
+  BitSet32 regsIn;
+  BitSet32 regsOut;
+  BitSet32 fregsIn;
+  BitSet32 fregsOut;
+  bool contains_flush_and_continue =
+      false;  // TODO: Did I say for the milionth time that I should have
+              // manipulated the regs in use instead?
+              // Granted, there is another use: if true, flush everything
+              // else first, as it is a hindrance in a loop.
 };
 
 struct BlockStats
@@ -136,6 +163,8 @@ struct CodeBlock
 
   // Which memory locations are occupied by this block.
   std::set<u32> m_physical_addresses;
+
+  std::vector<BranchInfo> m_branch_infos;
 };
 
 class PPCAnalyzer

@@ -254,15 +254,13 @@ void RCX64Reg::Unlock()
   contents = std::monostate{};
 }
 
+RCForkGuard::RCForkGuard() noexcept : rc(nullptr)
+{
+}
+
 RCForkGuard::RCForkGuard(RegCache& rc_) : rc(&rc_), m_regs(rc_.m_regs), m_xregs(rc_.m_xregs)
 {
   ASSERT(!rc->IsAnyConstraintActive());
-}
-
-RCForkGuard::RCForkGuard(RCForkGuard&& other) noexcept
-    : rc(other.rc), m_regs(std::move(other.m_regs)), m_xregs(std::move(other.m_xregs))
-{
-  other.rc = nullptr;
 }
 
 void RCForkGuard::EndFork()
@@ -273,7 +271,6 @@ void RCForkGuard::EndFork()
   ASSERT(!rc->IsAnyConstraintActive());
   rc->m_regs = m_regs;
   rc->m_xregs = m_xregs;
-  rc = nullptr;
 }
 
 RegCache::RegCache(Jit64& jit) : m_jit{jit}
@@ -418,6 +415,23 @@ void RegCache::PreloadRegisters(BitSet32 to_preload)
   }
 }
 
+void RegCache::InBlockBranchPreloadRegisters(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    BindToRegister(preg, true, false, regs);
+  }
+}
+
+void RegCache::ForceDirty(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    m_regs[preg].SetDirty();
+    DiscardImm(preg);
+  }
+}
+
 BitSet32 RegCache::RegistersInUse() const
 {
   BitSet32 result;
@@ -449,11 +463,22 @@ void RegCache::DiscardRegister(preg_t preg)
   m_regs[preg].SetDiscarded();
 }
 
-void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
+void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty, BitSet32 preserve_pregs)
 {
+  std::optional<X64Reg> fixed_xr = m_regs[i].GetFixedHost();
   if (!m_regs[i].IsInHostRegister())
   {
-    X64Reg xr = GetFreeXReg();
+    X64Reg xr;
+    if (fixed_xr)
+    {
+      xr = *m_regs[i].GetFixedHost();
+      FlushX(xr);
+    }
+    else
+    {
+      xr = GetFreeXReg(preserve_pregs);
+    }
+
     m_xregs[xr].SetBoundTo(i);
 
     if (doLoad)
@@ -470,6 +495,10 @@ void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
   }
   else
   {
+    X64Reg xr = m_regs[i].GetHostRegister().value();
+    ASSERT_MSG(DYNA_REC, !fixed_xr.has_value() || xr == fixed_xr,
+               "PPC Reg {} is fixed to X64 Reg {}, yet is bound to X64 Reg {}", i,
+               Common::ToUnderlying(*fixed_xr), Common::ToUnderlying(xr));
     // reg location must be simplereg; memory locations
     // and immediates are taken care of above.
     if (makeDirty)
@@ -494,7 +523,7 @@ void RegCache::StoreFromRegister(preg_t i, FlushMode mode,
   m_regs[i].SetFlushed(mode != FlushMode::Full);
 }
 
-X64Reg RegCache::GetFreeXReg()
+X64Reg RegCache::GetFreeXReg(BitSet32 preserve_pregs)
 {
   const auto order = GetAllocationOrder();
   for (const X64Reg xr : order)
@@ -513,7 +542,7 @@ X64Reg RegCache::GetFreeXReg()
     if (m_xregs[xreg].IsLocked())
       continue;
     const preg_t preg = m_xregs[xreg].Contents().value();
-    if (m_regs[preg].IsLocked())
+    if (m_regs[preg].IsLocked() || preserve_pregs[preg])
       continue;
 
     const float score = ScoreRegister(xreg);
@@ -534,6 +563,24 @@ X64Reg RegCache::GetFreeXReg()
   // Still no dice? Die!
   ASSERT_MSG(DYNA_REC, false, "Regcache ran out of regs");
   return INVALID_REG;
+}
+
+void RegCache::FixHostRegisters(BitSet32 pregs)
+{
+  for (preg_t i : pregs)
+  {
+    ASSERT_MSG(DYNA_REC, m_regs[i].IsInHostRegister(),
+               "Attmepting to fix PPC reg {} while it isn't bound to any X64 reg.", i);
+    m_regs[i].SetFixedHost(m_regs[i].GetHostRegister().value());
+  }
+}
+
+void RegCache::UnfixHostRegisters()
+{
+  for (auto& preg : m_regs)
+  {
+    preg.UnsetFixedHost();
+  }
 }
 
 int RegCache::NumFreeRegisters() const

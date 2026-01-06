@@ -97,13 +97,10 @@ private:
 
 class RCForkGuard
 {
+  // TODO: Separate commit?
 public:
   ~RCForkGuard() { EndFork(); }
-  RCForkGuard(RCForkGuard&&) noexcept;
-
-  RCForkGuard(const RCForkGuard&) = delete;
-  RCForkGuard& operator=(const RCForkGuard&) = delete;
-  RCForkGuard& operator=(RCForkGuard&&) = delete;
+  RCForkGuard() noexcept;
 
   void EndFork();
 
@@ -161,8 +158,10 @@ public:
   }
 
   virtual bool IsImm(preg_t preg) const = 0;
+  virtual BitSet32 GetImmSet() const = 0;
   virtual u32 Imm32(preg_t preg) const = 0;
   virtual s32 SImm32(preg_t preg) const = 0;
+  virtual size_t GetMaxPreloadableRegisters() const = 0;
 
   bool IsBound(preg_t preg) const { return m_regs[preg].IsInHostRegister(); }
 
@@ -179,12 +178,29 @@ public:
   void Flush(BitSet32 pregs = BitSet32::AllTrue(32),
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
   void Reset(BitSet32 pregs);
+
+  // TODO: I thought that in case of slushes during in-block branches, it was a viable option to
+  // simply restore ther registers the way they were. I was wrong: I didn't keep in mind that
+  // registers outside the branches would be flushed too, and even if dynamically the branch skips
+  // over it, the allocator will wrongly think that the register has been flushed. Beter solution:
+  // fork the "unconditional branches" too, and prevent every other source of flushes Fix the X64
+  // regs for the selected PPC regs, so that if they are unbound, they will be forced to be bound to
+  // the same X64 reg.
+  void FixHostRegisters(BitSet32 pregs);
+  // void FixCustomHostRegisters(std::array<X64CachedReg, 32> xregs); // For the day someone makes a
+  // more sophisticated register allocator.
+
+  // Make all PPC regs able to be bound to any X64 reg again.
+  void UnfixHostRegisters();
+
   void RevertStaged();
   void CommitStaged();
 
   bool IsAllUnlocked() const;
 
   void PreloadRegisters(BitSet32 pregs);
+  void InBlockBranchPreloadRegisters(BitSet32 regs);
+  void ForceDirty(BitSet32 regs);
   BitSet32 RegistersInUse() const;
 
 protected:
@@ -205,12 +221,13 @@ protected:
 
   void FlushX(Gen::X64Reg reg);
   void DiscardRegister(preg_t preg);
-  void BindToRegister(preg_t preg, bool doLoad = true, bool makeDirty = true);
+  void BindToRegister(preg_t preg, bool doLoad = true, bool makeDirty = true,
+                      BitSet32 preserve_pregs = {});
   void StoreFromRegister(
       preg_t preg, FlushMode mode = FlushMode::Full,
       IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
 
-  Gen::X64Reg GetFreeXReg();
+  Gen::X64Reg GetFreeXReg(BitSet32 preserve_pregs = {});
 
   int NumFreeRegisters() const;
   float ScoreRegister(Gen::X64Reg xreg) const;

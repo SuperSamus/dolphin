@@ -20,6 +20,7 @@
 #include "Core/PowerPC/Interpreter/ExceptionUtils.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
 #include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
+#include "Core/PowerPC/Jit64Common/Jit64Constants.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
 #include "Core/PowerPC/JitCommon/DivUtils.h"
 #include "Core/PowerPC/PPCAnalyst.h"
@@ -198,7 +199,10 @@ void Jit64::ComputeRC(preg_t preg, bool needs_test, bool needs_sext)
       // We don't want to do this if a test is needed though, because it would interrupt macro-op
       // fusion.
       arg.Unlock();
-      gpr.Flush(~js.op->gprInUse);
+      // TODO: I wouldn't need instruction-specific workarounds if I did things from the Analyzer
+      // instead...
+      if (!IsInBlockBranchActive())
+        gpr.Flush(~js.op->gprInUse);
     }
     DoMergedBranchCondition();
   }
@@ -434,54 +438,116 @@ void Jit64::DoMergedBranchCondition()
   js.skipInstructions = 1;
   const UGeckoInstruction& next = js.op[1].inst;
   int test_bit = 3 - (next.BI & 3);
-  bool condition = !!(next.BO & BO_BRANCH_IF_TRUE);
+
   const u32 nextPC = js.op[1].address;
 
   ASSERT(gpr.IsAllUnlocked());
 
-  FixupBranch pDontBranch;
-  switch (test_bit)
+  auto in_block_branch = TryInBlockBranch(js.op[1]);
+  if (std::holds_alternative<std::monostate>(in_block_branch))
   {
-  case PowerPC::CR_LT_BIT:
-    // Test < 0, so jump over if >= 0.
-    pDontBranch = J_CC(condition ? CC_GE : CC_L, Jump::Near);
-    break;
-  case PowerPC::CR_GT_BIT:
-    // Test > 0, so jump over if <= 0.
-    pDontBranch = J_CC(condition ? CC_LE : CC_G, Jump::Near);
-    break;
-  case PowerPC::CR_EQ_BIT:
-    // Test = 0, so jump over if != 0.
-    pDontBranch = J_CC(condition ? CC_NE : CC_E, Jump::Near);
-    break;
-  case PowerPC::CR_SO_BIT:
-    // SO bit, do not branch (we don't emulate SO for cmp).
-    pDontBranch = J(Jump::Near);
-    break;
-  }
+    // TODO: Should be called be the callers of DoMergedBranchCondition, not here.
+    // Jump over if the condition is false.
+    const bool condition = !(next.BO & BO_BRANCH_IF_TRUE);
 
-  {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
+    FixupBranch pDontBranch;
+    switch (test_bit)
+    {
+    case PowerPC::CR_LT_BIT:
+      pDontBranch = J_CC(condition ? CC_L : CC_GE, Jump::Near);
+      break;
+    case PowerPC::CR_GT_BIT:
+      pDontBranch = J_CC(condition ? CC_G : CC_LE, Jump::Near);
+      break;
+    case PowerPC::CR_EQ_BIT:
+      pDontBranch = J_CC(condition ? CC_E : CC_NE, Jump::Near);
+      break;
+    case PowerPC::CR_SO_BIT:
+      // SO bit, do not branch (we don't emulate SO for cmp).
+      pDontBranch = J(Jump::Near);
+      break;
+    }
 
-    gpr.Flush();
-    fpr.Flush();
+    {
+      RCForkGuard gpr_guard = gpr.Fork();
+      RCForkGuard fpr_guard = fpr.Fork();
 
-    DoMergedBranch();
-  }
+      gpr.Flush();
+      fpr.Flush();
 
-  SetJumpTarget(pDontBranch);
+      DoMergedBranch();
+    }
 
-  if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
-  {
-    gpr.Flush();
-    fpr.Flush();
-    WriteBranchWatch<false>(nextPC, nextPC + 4, next, {});
-    WriteExit(nextPC + 4);
+    SetJumpTarget(pDontBranch);
+
+    if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
+    {
+      gpr.Flush();
+      fpr.Flush();
+      WriteBranchWatch<false>(nextPC, nextPC + 4, next, {});
+      WriteExit(nextPC + 4);
+    }
+    else
+    {
+      WriteBranchWatch<false>(nextPC, nextPC + 4, next, CallerSavedRegistersInUse());
+    }
   }
   else
   {
-    WriteBranchWatch<false>(nextPC, nextPC + 4, next, CallerSavedRegistersInUse());
+    if (std::holds_alternative<FixupBranch*>(in_block_branch))
+    {
+      // TODO: Shittiest workaround ever to avoid setting flags... (Since this comes *after* the
+      // TEST or whatever.)
+      MOV(32, R(RSCRATCH), PPCSTATE(downcount));
+      LEA(32, RSCRATCH, MDisp(RSCRATCH, -js.downcountAmount));
+      MOV(32, PPCSTATE(downcount), R(RSCRATCH));
+      const bool condition = next.BO & BO_BRANCH_IF_TRUE;
+      FixupBranch* fixup = std::get<FixupBranch*>(in_block_branch);
+      switch (test_bit)
+      {
+      case PowerPC::CR_LT_BIT:
+        *fixup = J_CC(condition ? CC_L : CC_GE, Jump::Near);
+        break;
+      case PowerPC::CR_GT_BIT:
+        *fixup = J_CC(condition ? CC_G : CC_LE, Jump::Near);
+        break;
+      case PowerPC::CR_EQ_BIT:
+        *fixup = J_CC(condition ? CC_E : CC_NE, Jump::Near);
+        break;
+      case PowerPC::CR_SO_BIT:
+        // SO bit, do not branch (we don't emulate SO for cmp).
+        *fixup = J(Jump::Near);
+        break;
+      }
+      js.downcountAmount = 0;
+    }
+    else if (std::holds_alternative<const u8*>(in_block_branch))
+    {
+      const u8* destination = std::get<const u8*>(in_block_branch);
+      const bool condition = !(next.BO & BO_BRANCH_IF_TRUE);
+      FixupBranch pDontBranch;
+      switch (test_bit)
+      {
+      case PowerPC::CR_LT_BIT:
+        pDontBranch = J_CC(condition ? CC_L : CC_GE);
+        break;
+      case PowerPC::CR_GT_BIT:
+        pDontBranch = J_CC(condition ? CC_G : CC_LE);
+        break;
+      case PowerPC::CR_EQ_BIT:
+        pDontBranch = J_CC(condition ? CC_E : CC_NE);
+        break;
+      case PowerPC::CR_SO_BIT:
+        // TODO
+        // SO bit, do not branch (we don't emulate SO for cmp).
+        JMP(destination);
+        break;
+      }
+      WriteInBlockExit(js.op[1].branchTo);
+      JMP(destination);
+      SetJumpTarget(pDontBranch);
+      SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+    }
   }
 }
 
@@ -629,6 +695,9 @@ void Jit64::cmpXX(UGeckoInstruction inst)
 
   if (comparand.IsImm())
   {
+    // Edge case: if the comparand is both in a register and immediate, then the SUB
+    // instruction would prioritize the former, while not being sign extended.
+    comparand = RCOpArg::Imm32(comparand.Imm32());
     // sign extension will ruin this, so store it in a register
     if (!signedCompare && (comparand.Imm32() & 0x80000000U) != 0)
     {

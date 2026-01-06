@@ -267,8 +267,9 @@ bool JitBase::CanMergeNextInstructions(int count) const
   // Be careful: a breakpoint kills flags in between instructions
   for (int i = 1; i <= count; i++)
   {
-    if (IsDebuggingEnabled() &&
-        m_system.GetPowerPC().GetBreakPoints().IsAddressBreakPoint(js.op[i].address))
+    if (js.op[i].isBranchTarget ||
+        (IsDebuggingEnabled() &&
+         m_system.GetPowerPC().GetBreakPoints().IsAddressBreakPoint(js.op[i].address)))
     {
       return false;
     }
