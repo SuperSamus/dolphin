@@ -197,10 +197,8 @@ void Jit64::bcx(UGeckoInstruction inst)
   }
 
   {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
-    gpr.Flush();
-    fpr.Flush();
+    gpr.Flush(RegCache::FlushMode::MaintainState);
+    fpr.Flush(RegCache::FlushMode::MaintainState);
 
     WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
     if (js.op->branchIsIdleLoop)
@@ -268,10 +266,8 @@ void Jit64::bcctrx(UGeckoInstruction inst)
       MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));  // LR = PC + 4;
 
     {
-      RCForkGuard gpr_guard = gpr.Fork();
-      RCForkGuard fpr_guard = fpr.Fork();
-      gpr.Flush();
-      fpr.Flush();
+      gpr.Flush(RegCache::FlushMode::MaintainState);
+      fpr.Flush(RegCache::FlushMode::MaintainState);
       WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, BitSet32{RSCRATCH});
       WriteExitDestInRSCRATCH(inst.LK_3, js.compilerPC + 4);
       // Would really like to continue the block here, but it ends. TODO.
@@ -327,10 +323,8 @@ void Jit64::bclrx(UGeckoInstruction inst)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
   {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
-    gpr.Flush();
-    fpr.Flush();
+    gpr.Flush(RegCache::FlushMode::MaintainState);
+    fpr.Flush(RegCache::FlushMode::MaintainState);
 
     if (js.op->branchIsIdleLoop)
     {
