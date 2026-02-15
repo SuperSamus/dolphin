@@ -159,7 +159,7 @@ public:
   RCX64Reg Scratch(Gen::X64Reg xr);
 
   void Discard(BitSet32 pregs);
-  void Flush(BitSet32 pregs = BitSet32::AllTrue(32), FlushMode mode = FlushMode::Full,
+  void Flush(BitSet32 pregs = BitSet32::AllTrue(), FlushMode mode = FlushMode::Full,
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
   void Flush(FlushMode mode,
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No)
@@ -173,7 +173,7 @@ public:
   bool IsAllUnlocked() const;
 
   void PreloadRegisters(BitSet32 pregs);
-  BitSet32 RegistersInUse() const;
+  BitSet16 RegistersInUse() const;
 
 protected:
   friend class RCOpArg;
