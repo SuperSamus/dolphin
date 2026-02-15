@@ -94,28 +94,6 @@ private:
   std::variant<std::monostate, Gen::X64Reg, preg_t> contents;
 };
 
-class RCForkGuard
-{
-public:
-  ~RCForkGuard() { EndFork(); }
-  RCForkGuard(RCForkGuard&&) noexcept;
-
-  RCForkGuard(const RCForkGuard&) = delete;
-  RCForkGuard& operator=(const RCForkGuard&) = delete;
-  RCForkGuard& operator=(RCForkGuard&&) = delete;
-
-  void EndFork();
-
-private:
-  friend class RegCache;
-
-  explicit RCForkGuard(RegCache& rc_);
-
-  RegCache* rc;
-  std::array<PPCCachedReg, 32> m_regs;
-  std::array<X64CachedReg, NUM_XREGS> m_xregs;
-};
-
 class RegCache
 {
 public:
@@ -123,6 +101,10 @@ public:
   {
     // All dirty registers get written back, and all registers get removed from the cache.
     Full,
+    // All dirty registers get written back, but the state of the cache is untouched.
+    // The host registers may get clobbered. This is intended for use when doing a block exit
+    // after a conditional branch.
+    MaintainState,
     // All dirty registers get written back and get set as no longer dirty.
     // No registers are removed from the cache.
     Undirty,
@@ -176,12 +158,16 @@ public:
   RCX64Reg Scratch();
   RCX64Reg Scratch(Gen::X64Reg xr);
 
-  RCForkGuard Fork();
   void Discard(BitSet32 pregs);
   void Flush(BitSet32 pregs = BitSet32::AllTrue(32), FlushMode mode = FlushMode::Full,
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
+  void Flush(FlushMode mode,
+             IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No)
+  {
+    Flush(BitSet32::AllTrue(32), mode, ignore_discarded_registers);
+  }
   void Reset(BitSet32 pregs);
-  void Revert();
+  BitSet32 RegistersRevertable() const;
   void Commit();
 
   bool IsAllUnlocked() const;

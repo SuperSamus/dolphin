@@ -351,10 +351,8 @@ void Jit64::Shutdown()
 void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
 {
   FlushCarry();
-  gpr.Flush(BitSet32(0xFFFFFFFF), RegCache::FlushMode::Full,
-            RegCache::IgnoreDiscardedRegisters::Yes);
-  fpr.Flush(BitSet32(0xFFFFFFFF), RegCache::FlushMode::Full,
-            RegCache::IgnoreDiscardedRegisters::Yes);
+  gpr.Flush(RegCache::FlushMode::Full, RegCache::IgnoreDiscardedRegisters::Yes);
+  fpr.Flush(RegCache::FlushMode::Full, RegCache::IgnoreDiscardedRegisters::Yes);
 
   if (js.op->canEndBlock)
   {
@@ -404,11 +402,8 @@ void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
     SwitchToFarCode();
     SetJumpTarget(exception);
 
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
-
-    gpr.Flush();
-    fpr.Flush();
+    gpr.Flush(RegCache::FlushMode::MaintainState);
+    fpr.Flush(RegCache::FlushMode::MaintainState);
 
     MOV(32, PPCSTATE(pc), Imm32(js.op->address));
     WriteExceptionExit();
@@ -1049,11 +1044,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         FixupBranch noCPInt = J_CC(CC_Z, Jump::Near);
 
         {
-          RCForkGuard gpr_guard = gpr.Fork();
-          RCForkGuard fpr_guard = fpr.Fork();
-
-          gpr.Flush();
-          fpr.Flush();
+          gpr.Flush(RegCache::FlushMode::MaintainState);
+          fpr.Flush(RegCache::FlushMode::MaintainState);
 
           MOV(32, PPCSTATE(pc), Imm32(op.address));
           WriteExternalExceptionExit();
@@ -1112,11 +1104,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SwitchToFarCode();
         SetJumpTarget(b1);
         {
-          RCForkGuard gpr_guard = gpr.Fork();
-          RCForkGuard fpr_guard = fpr.Fork();
-
-          gpr.Flush();
-          fpr.Flush();
+          gpr.Flush(RegCache::FlushMode::MaintainState);
+          fpr.Flush(RegCache::FlushMode::MaintainState);
 
           // If a FPU exception occurs, the exception handler will read
           // from PC.  Update PC with the latest value in case that happens.
@@ -1211,13 +1200,10 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
           m_exception_handler_at_loc[js.fastmemLoadStore] = GetWritableCodePtr();
         }
 
-        RCForkGuard gpr_guard = gpr.Fork();
-        RCForkGuard fpr_guard = fpr.Fork();
-
-        gpr.Revert();
-        fpr.Revert();
-        gpr.Flush();
-        fpr.Flush();
+        BitSet32 gpr_revertable = gpr.RegistersRevertable();
+        BitSet32 fpr_revertable = fpr.RegistersRevertable();
+        gpr.Flush(~gpr_revertable, RegCache::FlushMode::MaintainState);
+        fpr.Flush(~fpr_revertable, RegCache::FlushMode::MaintainState);
 
         MOV(32, PPCSTATE(pc), Imm32(op.address));
         WriteExceptionExit();
@@ -1377,11 +1363,8 @@ void Jit64::FlushRegistersBeforeSlowAccess()
     BitSet32 fprs = mem_checks.GetFPRsUsedInConditions();
     if (gprs || fprs)
     {
-      RCForkGuard gpr_guard = gpr.Fork();
-      RCForkGuard fpr_guard = fpr.Fork();
-
-      gpr.Flush(gprs);
-      fpr.Flush(fprs);
+      gpr.Flush(gprs, RegCache::FlushMode::MaintainState);
+      fpr.Flush(RegCache::FlushMode::MaintainState);
     }
   }
 }

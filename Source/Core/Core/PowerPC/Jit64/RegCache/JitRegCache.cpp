@@ -209,28 +209,6 @@ void RCX64Reg::Unlock()
   contents = std::monostate{};
 }
 
-RCForkGuard::RCForkGuard(RegCache& rc_) : rc(&rc_), m_regs(rc_.m_regs), m_xregs(rc_.m_xregs)
-{
-  ASSERT(!rc->IsAnyConstraintActive());
-}
-
-RCForkGuard::RCForkGuard(RCForkGuard&& other) noexcept
-    : rc(other.rc), m_regs(std::move(other.m_regs)), m_xregs(std::move(other.m_xregs))
-{
-  other.rc = nullptr;
-}
-
-void RCForkGuard::EndFork()
-{
-  if (!rc)
-    return;
-
-  ASSERT(!rc->IsAnyConstraintActive());
-  rc->m_regs = m_regs;
-  rc->m_xregs = m_xregs;
-  rc = nullptr;
-}
-
 RegCache::RegCache(Jit64& jit) : m_jit{jit}
 {
 }
@@ -309,11 +287,6 @@ RCX64Reg RegCache::Scratch(X64Reg xr)
   return RCX64Reg{this, xr};
 }
 
-RCForkGuard RegCache::Fork()
-{
-  return RCForkGuard{*this};
-}
-
 void RegCache::Discard(BitSet32 pregs)
 {
   ASSERT_MSG(DYNA_REC, std::ranges::none_of(m_xregs, &X64CachedReg::IsLocked),
@@ -357,14 +330,16 @@ void RegCache::Reset(BitSet32 pregs)
   }
 }
 
-void RegCache::Revert()
+BitSet32 RegCache::RegistersRevertable() const
 {
   ASSERT(IsAllUnlocked());
-  for (auto& reg : m_regs)
+  BitSet32 result;
+  for (size_t i = 0; i < m_regs.size(); i++)
   {
-    if (reg.IsRevertable())
-      reg.SetRevert();
+    if (m_regs[i].IsRevertable())
+      result[i] = true;
   }
+  return result;
 }
 
 void RegCache::Commit()
@@ -477,7 +452,8 @@ void RegCache::StoreFromRegister(preg_t i, FlushMode mode,
   if (mode == FlushMode::Full && m_regs[i].IsInHostRegister())
     m_xregs[m_regs[i].GetHostRegister()].Unbind();
 
-  m_regs[i].SetFlushed(mode != FlushMode::Full);
+  if (mode != FlushMode::MaintainState)
+    m_regs[i].SetFlushed(mode != FlushMode::Full);
 }
 
 X64Reg RegCache::GetFreeXReg()

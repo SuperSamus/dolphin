@@ -459,15 +459,10 @@ void Jit64::DoMergedBranchCondition()
     break;
   }
 
-  {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
+  gpr.Flush(RegCache::FlushMode::MaintainState);
+  fpr.Flush(RegCache::FlushMode::MaintainState);
 
-    gpr.Flush();
-    fpr.Flush();
-
-    DoMergedBranch();
-  }
+  DoMergedBranch();
 
   SetJumpTarget(pDontBranch);
 
@@ -2533,9 +2528,6 @@ void Jit64::twX(UGeckoInstruction inst)
   {
     SwitchToFarCode();
 
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
-
     for (const FixupBranch& fixup : fixups)
     {
       SetJumpTarget(fixup);
@@ -2544,8 +2536,8 @@ void Jit64::twX(UGeckoInstruction inst)
     OR(32, PPCSTATE(Exceptions), Imm32(EXCEPTION_PROGRAM));
     MOV(32, PPCSTATE_SRR1, Imm32(static_cast<u32>(ProgramExceptionCause::Trap)));
 
-    gpr.Flush();
-    fpr.Flush();
+    gpr.Flush(RegCache::FlushMode::MaintainState);
+    fpr.Flush(RegCache::FlushMode::MaintainState);
 
     MOV(32, PPCSTATE(pc), Imm32(js.compilerPC));
     WriteExceptionExit();
