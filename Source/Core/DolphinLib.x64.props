@@ -9,7 +9,6 @@
     <ClInclude Include="Core\DSP\Jit\x64\DSPJitTables.h" />
     <ClInclude Include="Core\PowerPC\Jit64\Jit.h" />
     <ClInclude Include="Core\PowerPC\Jit64\JitAsm.h" />
-    <ClInclude Include="Core\PowerPC\Jit64\RegCache\CachedReg.h" />
     <ClInclude Include="Core\PowerPC\Jit64\RegCache\FPURegCache.h" />
     <ClInclude Include="Core\PowerPC\Jit64\RegCache\GPRRegCache.h" />
     <ClInclude Include="Core\PowerPC\Jit64\RegCache\JitRegCache.h" />
