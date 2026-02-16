@@ -1219,12 +1219,10 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         gpr.Discard(op.gprDiscardable);
         fpr.Discard(op.fprDiscardable);
       }
-      gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten) & (op.regsIn | op.regsOut),
-                RegCache::FlushMode::Full);
-      fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten) & (op.fregsIn | op.GetFregsOut()),
-                RegCache::FlushMode::Full);
-      gpr.Flush(~op.gprWillBeWritten & op.regsOut, RegCache::FlushMode::Undirty);
-      fpr.Flush(~op.fprWillBeWritten & op.GetFregsOut(), RegCache::FlushMode::Undirty);
+      gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten), RegCache::FlushMode::Full);
+      fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten), RegCache::FlushMode::Full);
+      gpr.Flush(~op.gprWillBeWritten, RegCache::FlushMode::Undirty);
+      fpr.Flush(~op.fprWillBeWritten, RegCache::FlushMode::Undirty);
 
       if (opinfo->flags & FL_LOADSTORE)
         ++js.numLoadStoreInst;
