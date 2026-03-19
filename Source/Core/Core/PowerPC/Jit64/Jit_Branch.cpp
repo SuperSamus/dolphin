@@ -8,7 +8,6 @@
 #include "Common/x64Emitter.h"
 #include "Core/Debugger/BranchWatch.h"
 #include "Core/PowerPC/Gekko.h"
-#include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
 #include "Core/PowerPC/PPCAnalyst.h"
 #include "Core/PowerPC/PowerPC.h"
@@ -197,8 +196,8 @@ void Jit64::bcx(UGeckoInstruction inst)
   }
 
   {
-    gpr.Flush(RegCache::FlushMode::MaintainState);
-    fpr.Flush(RegCache::FlushMode::MaintainState);
+    gpr.Flush(FlushMode::MaintainState);
+    fpr.Flush(FlushMode::MaintainState);
 
     WriteBranchWatch<true>(js.compilerPC, js.op->branchTo, inst, {});
     if (js.op->branchIsIdleLoop)
@@ -266,8 +265,8 @@ void Jit64::bcctrx(UGeckoInstruction inst)
       MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));  // LR = PC + 4;
 
     {
-      gpr.Flush(RegCache::FlushMode::MaintainState);
-      fpr.Flush(RegCache::FlushMode::MaintainState);
+      gpr.Flush(FlushMode::MaintainState);
+      fpr.Flush(FlushMode::MaintainState);
       WriteBranchWatchDestInRSCRATCH(js.compilerPC, inst, BitSet32{RSCRATCH});
       WriteExitDestInRSCRATCH(inst.LK_3, js.compilerPC + 4);
       // Would really like to continue the block here, but it ends. TODO.
@@ -323,8 +322,8 @@ void Jit64::bclrx(UGeckoInstruction inst)
     MOV(32, PPCSTATE_LR, Imm32(js.compilerPC + 4));
 
   {
-    gpr.Flush(RegCache::FlushMode::MaintainState);
-    fpr.Flush(RegCache::FlushMode::MaintainState);
+    gpr.Flush(FlushMode::MaintainState);
+    fpr.Flush(FlushMode::MaintainState);
 
     if (js.op->branchIsIdleLoop)
     {
