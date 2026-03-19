@@ -120,7 +120,8 @@ using namespace PowerPC;
 */
 
 Jit64::Jit64(Core::System& system)
-    : JitBase(system), QuantizedMemoryRoutines(*this),
+    : JitBase(system), QuantizedMemoryRoutines(*this), gpr(GPRRegCache(GPRRegCacheImpl(this))),
+      fpr(FPURegCache(FPURegCacheImpl(this))),
       m_disassembler(HostDisassembler::Factory(HostDisassembler::Platform::x86_64))
 {
 }
@@ -266,9 +267,6 @@ void Jit64::Init()
   js.fastmemLoadStore = nullptr;
   js.compilerPC = 0;
 
-  gpr.SetEmitter(this);
-  fpr.SetEmitter(this);
-
   const size_t routines_size = asm_routines.CODE_SIZE;
   const size_t trampolines_size = jo.memcheck ? TRAMPOLINE_CODE_SIZE_MMU : TRAMPOLINE_CODE_SIZE;
   const size_t farcode_size = jo.memcheck ? FARCODE_SIZE_MMU : FARCODE_SIZE;
@@ -351,8 +349,8 @@ void Jit64::Shutdown()
 void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
 {
   FlushCarry();
-  gpr.Flush(RegCache::FlushMode::Full, RegCache::IgnoreDiscardedRegisters::Yes);
-  fpr.Flush(RegCache::FlushMode::Full, RegCache::IgnoreDiscardedRegisters::Yes);
+  gpr.Flush(FlushMode::Full, IgnoreDiscardedRegisters::Yes);
+  fpr.Flush(FlushMode::Full, IgnoreDiscardedRegisters::Yes);
 
   if (js.op->canEndBlock)
   {
@@ -402,8 +400,8 @@ void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
     SwitchToFarCode();
     SetJumpTarget(exception);
 
-    gpr.Flush(RegCache::FlushMode::MaintainState);
-    fpr.Flush(RegCache::FlushMode::MaintainState);
+    gpr.Flush(FlushMode::MaintainState);
+    fpr.Flush(FlushMode::MaintainState);
 
     MOV(32, PPCSTATE(pc), Imm32(js.op->address));
     WriteExceptionExit();
@@ -1044,8 +1042,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         FixupBranch noCPInt = J_CC(CC_Z, Jump::Near);
 
         {
-          gpr.Flush(RegCache::FlushMode::MaintainState);
-          fpr.Flush(RegCache::FlushMode::MaintainState);
+          gpr.Flush(FlushMode::MaintainState);
+          fpr.Flush(FlushMode::MaintainState);
 
           MOV(32, PPCSTATE(pc), Imm32(op.address));
           WriteExternalExceptionExit();
@@ -1104,8 +1102,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SwitchToFarCode();
         SetJumpTarget(b1);
         {
-          gpr.Flush(RegCache::FlushMode::MaintainState);
-          fpr.Flush(RegCache::FlushMode::MaintainState);
+          gpr.Flush(FlushMode::MaintainState);
+          fpr.Flush(FlushMode::MaintainState);
 
           // If a FPU exception occurs, the exception handler will read
           // from PC.  Update PC with the latest value in case that happens.
@@ -1202,8 +1200,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
         BitSet32 gpr_revertable = gpr.RegistersRevertable();
         BitSet32 fpr_revertable = fpr.RegistersRevertable();
-        gpr.Flush(~gpr_revertable, RegCache::FlushMode::MaintainState);
-        fpr.Flush(~fpr_revertable, RegCache::FlushMode::MaintainState);
+        gpr.Flush(~gpr_revertable, FlushMode::MaintainState);
+        fpr.Flush(~fpr_revertable, FlushMode::MaintainState);
 
         MOV(32, PPCSTATE(pc), Imm32(op.address));
         WriteExceptionExit();
@@ -1219,10 +1217,10 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         gpr.Discard(op.gprDiscardable);
         fpr.Discard(op.fprDiscardable);
       }
-      gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten), RegCache::FlushMode::Full);
-      fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten), RegCache::FlushMode::Full);
-      gpr.Flush(~op.gprWillBeWritten, RegCache::FlushMode::Undirty);
-      fpr.Flush(~op.fprWillBeWritten, RegCache::FlushMode::Undirty);
+      gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten), FlushMode::Full);
+      fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten), FlushMode::Full);
+      gpr.Flush(~op.gprWillBeWritten, FlushMode::Undirty);
+      fpr.Flush(~op.fprWillBeWritten, FlushMode::Undirty);
 
       if (opinfo->flags & FL_LOADSTORE)
         ++js.numLoadStoreInst;
@@ -1362,8 +1360,8 @@ void Jit64::FlushRegistersBeforeSlowAccess()
     BitSet32 fprs = mem_checks.GetFPRsUsedInConditions();
     if (gprs || fprs)
     {
-      gpr.Flush(gprs, RegCache::FlushMode::MaintainState);
-      fpr.Flush(RegCache::FlushMode::MaintainState);
+      gpr.Flush(gprs, FlushMode::MaintainState);
+      fpr.Flush(FlushMode::MaintainState);
     }
   }
 }

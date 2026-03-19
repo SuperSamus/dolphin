@@ -138,10 +138,10 @@ void Jit64::lXXx(UGeckoInstruction inst)
   s32 loadOffset = 0;
 
   // Prepare result
-  RCX64Reg Rd = jo.memcheck ? gpr.RevertableBind(d, RCMode::Write) : gpr.Bind(d, RCMode::Write);
+  GPRRCX64Reg Rd = jo.memcheck ? gpr.RevertableBind(d, RCMode::Write) : gpr.Bind(d, RCMode::Write);
 
   // Prepare address operand
-  RCOpArg opAddress;
+  GPRRCOpArg opAddress;
   if (!update && !a)
   {
     if (indexed)
@@ -150,7 +150,7 @@ void Jit64::lXXx(UGeckoInstruction inst)
     }
     else
     {
-      opAddress = RCOpArg::Imm32((u32)(s32)inst.SIMM_16);
+      opAddress = GPRRCOpArg::Imm32((u32)(s32)inst.SIMM_16);
     }
   }
   else if (update && ((a == 0) || (d == a)))
@@ -162,14 +162,14 @@ void Jit64::lXXx(UGeckoInstruction inst)
     if (!indexed && gpr.IsImm(a) && !jo.memcheck)
     {
       u32 val = gpr.Imm32(a) + inst.SIMM_16;
-      opAddress = RCOpArg::Imm32(val);
+      opAddress = GPRRCOpArg::Imm32(val);
       if (update)
         gpr.SetImmediate32(a, val);
     }
     else if (indexed && gpr.IsImm(a) && gpr.IsImm(b) && !jo.memcheck)
     {
       u32 val = gpr.Imm32(a) + gpr.Imm32(b);
-      opAddress = RCOpArg::Imm32(val);
+      opAddress = GPRRCOpArg::Imm32(val);
       if (update)
         gpr.SetImmediate32(a, val);
     }
@@ -182,14 +182,14 @@ void Jit64::lXXx(UGeckoInstruction inst)
       if (use_constant_offset)
         offset = indexed ? gpr.SImm32(b) : (s32)inst.SIMM_16;
 
-      RCOpArg Rb = use_constant_offset ? RCOpArg{} : gpr.Use(b, RCMode::Read);
+      GPRRCOpArg Rb = use_constant_offset ? GPRRCOpArg{} : gpr.Use(b, RCMode::Read);
 
       // Depending on whether we have an immediate and/or update, find the optimum way to calculate
       // the load address.
       if ((update || use_constant_offset) && !jo.memcheck)
       {
         opAddress = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
-        RegCache::Realize(opAddress, Rb);
+        GPRRegCache::Realize(opAddress, Rb);
 
         if (!use_constant_offset)
           ADD(32, opAddress, Rb);
@@ -202,9 +202,9 @@ void Jit64::lXXx(UGeckoInstruction inst)
       {
         storeAddress = true;
         // In this case we need an extra temporary register.
-        opAddress = RCOpArg::R(RSCRATCH2);
-        RCOpArg Ra = gpr.Use(a, RCMode::Read);
-        RegCache::Realize(opAddress, Ra, Rb);
+        opAddress = GPRRCOpArg::R(RSCRATCH2);
+        GPRRCOpArg Ra = gpr.Use(a, RCMode::Read);
+        GPRRegCache::Realize(opAddress, Ra, Rb);
 
         if (use_constant_offset)
           MOV_sum(32, RSCRATCH2, Ra, Imm32((u32)offset));
@@ -214,8 +214,8 @@ void Jit64::lXXx(UGeckoInstruction inst)
     }
   }
 
-  RCX64Reg Ra = (update && storeAddress) ? gpr.Bind(a, RCMode::ReadWrite) : RCX64Reg{};
-  RegCache::Realize(opAddress, Ra, Rd);
+  GPRRCX64Reg Ra = (update && storeAddress) ? gpr.Bind(a, RCMode::ReadWrite) : GPRRCX64Reg{};
+  GPRRegCache::Realize(opAddress, Ra, Rd);
 
   BitSet32 registersInUse = CallerSavedRegistersInUse();
   // We need to save the (usually scratch) address register for the update.
@@ -247,11 +247,11 @@ void Jit64::dcbx(UGeckoInstruction inst)
                          js.op[1].inst.RA_6 == inst.RB && js.op[1].inst.RD_2 == inst.RB &&
                          js.op[2].inst.hex == 0x4200fff8;
 
-  RCOpArg Ra = inst.RA ? gpr.Use(inst.RA, RCMode::Read) : RCOpArg::Imm32(0);
-  RCX64Reg Rb = gpr.Bind(inst.RB, make_loop ? RCMode::ReadWrite : RCMode::Read);
-  RegCache::Realize(Ra, Rb);
+  GPRRCOpArg Ra = inst.RA ? gpr.Use(inst.RA, RCMode::Read) : GPRRCOpArg::Imm32(0);
+  GPRRCX64Reg Rb = gpr.Bind(inst.RB, make_loop ? RCMode::ReadWrite : RCMode::Read);
+  GPRRegCache::Realize(Ra, Rb);
 
-  RCX64Reg loop_counter;
+  GPRRCX64Reg loop_counter;
   if (make_loop)
   {
     // We'll execute somewhere between one single cacheline invalidation and however many are needed
@@ -261,10 +261,10 @@ void Jit64::dcbx(UGeckoInstruction inst)
     // bdnz afterwards! So if we invalidate a single cache line, we don't adjust the registers at
     // all, if we invalidate 2 cachelines we adjust the registers by one step, and so on.
 
-    RCX64Reg reg_cycle_count = gpr.Scratch();
-    RCX64Reg reg_downcount = gpr.Scratch();
+    GPRRCX64Reg reg_cycle_count = gpr.Scratch();
+    GPRRCX64Reg reg_downcount = gpr.Scratch();
     loop_counter = gpr.Scratch();
-    RegCache::Realize(reg_cycle_count, reg_downcount, loop_counter);
+    GPRRegCache::Realize(reg_cycle_count, reg_downcount, loop_counter);
 
     // This must be true in order for us to pick up the DIV results and not trash any data.
     static_assert(RSCRATCH == Gen::EAX && RSCRATCH2 == Gen::EDX);
@@ -338,8 +338,8 @@ void Jit64::dcbx(UGeckoInstruction inst)
   }
 
   X64Reg tmp = RSCRATCH2;
-  RCX64Reg effective_address = gpr.Scratch();
-  RegCache::Realize(effective_address);
+  GPRRCX64Reg effective_address = gpr.Scratch();
+  GPRRegCache::Realize(effective_address);
 
   FixupBranch bat_lookup_failed;
   MOV(32, R(effective_address), R(addr));
@@ -431,9 +431,9 @@ void Jit64::dcbz(UGeckoInstruction inst)
   FlushRegistersBeforeSlowAccess();
 
   {
-    RCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : RCOpArg::Imm32(0);
-    RCOpArg Rb = gpr.Use(b, RCMode::Read);
-    RegCache::Realize(Ra, Rb);
+    GPRRCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : GPRRCOpArg::Imm32(0);
+    GPRRCOpArg Rb = gpr.Use(b, RCMode::Read);
+    GPRRegCache::Realize(Ra, Rb);
 
     MOV_sum(32, RSCRATCH, Ra, Rb);
     AND(32, R(RSCRATCH), Imm32(~31));
@@ -532,8 +532,8 @@ void Jit64::stX(UGeckoInstruction inst)
   {
     const u32 addr = (a ? gpr.Imm32(a) : 0) + offset;
     const bool exception = [&] {
-      RCOpArg Rs = gpr.Use(s, RCMode::Read);
-      RegCache::Realize(Rs);
+      GPRRCOpArg Rs = gpr.Use(s, RCMode::Read);
+      GPRRegCache::Realize(Rs);
       return WriteToConstAddress(accessSize, Rs, addr, CallerSavedRegistersInUse());
     }();
     if (update)
@@ -544,8 +544,8 @@ void Jit64::stX(UGeckoInstruction inst)
       }
       else
       {
-        RCOpArg Ra = gpr.RevertableBind(a, RCMode::Write);
-        RegCache::Realize(Ra);
+        GPRRCOpArg Ra = gpr.RevertableBind(a, RCMode::Write);
+        GPRRegCache::Realize(Ra);
         MemoryExceptionCheck();
         MOV(32, Ra, Imm32(addr));
       }
@@ -553,19 +553,19 @@ void Jit64::stX(UGeckoInstruction inst)
   }
   else
   {
-    RCX64Reg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
-    RCOpArg reg_value;
+    GPRRCX64Reg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
+    GPRRCOpArg reg_value;
     if (WriteClobbersRegValue(accessSize, /* swap */ true))
     {
       if (gpr.IsImm(s))
       {
-        reg_value = RCOpArg::Imm32(gpr.Imm32(s));
+        reg_value = GPRRCOpArg::Imm32(gpr.Imm32(s));
       }
       else
       {
-        RCOpArg Rs = gpr.Use(s, RCMode::Read);
-        RegCache::Realize(Rs);
-        reg_value = RCOpArg::R(RSCRATCH2);
+        GPRRCOpArg Rs = gpr.Use(s, RCMode::Read);
+        GPRRegCache::Realize(Rs);
+        reg_value = GPRRCOpArg::R(RSCRATCH2);
         MOV(32, reg_value, Rs);
       }
     }
@@ -573,7 +573,7 @@ void Jit64::stX(UGeckoInstruction inst)
     {
       reg_value = gpr.BindOrImm(s, RCMode::Read);
     }
-    RegCache::Realize(Ra, reg_value);
+    GPRRegCache::Realize(Ra, reg_value);
     SafeWriteRegToReg(reg_value, Ra, accessSize, offset, CallerSavedRegistersInUse(),
                       SAFE_LOADSTORE_CLOBBER_RSCRATCH_INSTEAD_OF_ADDR);
 
@@ -616,19 +616,19 @@ void Jit64::stXx(UGeckoInstruction inst)
 
   const bool does_clobber = WriteClobbersRegValue(accessSize, /* swap */ !byte_reverse);
 
-  RCOpArg Ra = update ? gpr.Bind(a, RCMode::ReadWrite) : gpr.Use(a, RCMode::Read);
-  RCOpArg Rb = gpr.Use(b, RCMode::Read);
-  RCOpArg Rs = does_clobber ?
-                   (gpr.IsImm(s) ? RCOpArg::Imm32(gpr.Imm32(s)) : gpr.Use(s, RCMode::Read)) :
-                   gpr.BindOrImm(s, RCMode::Read);
-  RegCache::Realize(Ra, Rb, Rs);
+  GPRRCOpArg Ra = update ? gpr.Bind(a, RCMode::ReadWrite) : gpr.Use(a, RCMode::Read);
+  GPRRCOpArg Rb = gpr.Use(b, RCMode::Read);
+  GPRRCOpArg Rs = does_clobber ?
+                      (gpr.IsImm(s) ? GPRRCOpArg::Imm32(gpr.Imm32(s)) : gpr.Use(s, RCMode::Read)) :
+                      gpr.BindOrImm(s, RCMode::Read);
+  GPRRegCache::Realize(Ra, Rb, Rs);
 
   MOV_sum(32, RSCRATCH2, Ra, Rb);
 
   if (!Rs.IsImm() && does_clobber)
   {
     MOV(32, R(RSCRATCH), Rs);
-    Rs = RCOpArg::R(RSCRATCH);
+    Rs = GPRRCOpArg::R(RSCRATCH);
   }
   BitSet32 registersInUse = CallerSavedRegistersInUse();
   if (update)
@@ -652,16 +652,16 @@ void Jit64::lmw(UGeckoInstruction inst)
 
   // TODO: This doesn't handle rollback on DSI correctly
   {
-    RCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : RCOpArg::Imm32(0);
-    RegCache::Realize(Ra);
+    GPRRCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : GPRRCOpArg::Imm32(0);
+    GPRRegCache::Realize(Ra);
     MOV_sum(32, RSCRATCH2, Ra, Imm32((u32)(s32)inst.SIMM_16));
   }
   for (int i = d; i < 32; i++)
   {
     SafeLoadToReg(RSCRATCH, R(RSCRATCH2), 32, (i - d) * 4,
                   CallerSavedRegistersInUse() | BitSet32{RSCRATCH2}, false);
-    RCOpArg Ri = gpr.Bind(i, RCMode::Write);
-    RegCache::Realize(Ri);
+    GPRRCOpArg Ri = gpr.Bind(i, RCMode::Write);
+    GPRRegCache::Realize(Ri);
     MOV(32, Ri, R(RSCRATCH));
   }
 }
@@ -678,9 +678,9 @@ void Jit64::stmw(UGeckoInstruction inst)
   // TODO: This doesn't handle rollback on DSI correctly
   for (int i = d; i < 32; i++)
   {
-    RCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : RCOpArg::Imm32(0);
-    RCOpArg Ri = gpr.Use(i, RCMode::Read);
-    RegCache::Realize(Ra, Ri);
+    GPRRCOpArg Ra = a ? gpr.Use(a, RCMode::Read) : GPRRCOpArg::Imm32(0);
+    GPRRCOpArg Ri = gpr.Use(i, RCMode::Read);
+    GPRRegCache::Realize(Ra, Ri);
 
     if (Ra.IsZero())
       XOR(32, R(RSCRATCH), R(RSCRATCH));
@@ -689,7 +689,7 @@ void Jit64::stmw(UGeckoInstruction inst)
     if (!Ri.IsImm())
     {
       MOV(32, R(RSCRATCH2), Ri);
-      Ri = RCOpArg::R(RSCRATCH2);
+      Ri = GPRRCOpArg::R(RSCRATCH2);
     }
     SafeWriteRegToReg(Ri, RSCRATCH, 32, (i - d) * 4 + (u32)(s32)inst.SIMM_16,
                       CallerSavedRegistersInUse());

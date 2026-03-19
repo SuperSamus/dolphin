@@ -23,9 +23,9 @@ void Jit64::ps_mr(UGeckoInstruction inst)
   if (d == b)
     return;
 
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(Rb, Rd);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURegCache::Realize(Rb, Rd);
   MOVAPD(Rd, Rb);
 }
 
@@ -41,11 +41,11 @@ void Jit64::ps_sum(UGeckoInstruction inst)
   int b = inst.FB;
   int c = inst.FC;
 
-  RCOpArg Ra = fpr.Use(a, RCMode::Read);
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCOpArg Rc = fpr.Use(c, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(Ra, Rb, Rc, Rd);
+  FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURegCache::Realize(Ra, Rb, Rc, Rd);
 
   X64Reg tmp = XMM1;
   MOVDDUP(tmp, Ra);  // {a.ps0, a.ps0}
@@ -81,11 +81,11 @@ void Jit64::ps_muls(UGeckoInstruction inst)
   int c = inst.FC;
   bool round_input = !js.op->fprIsSingle[c];
 
-  RCOpArg Ra = fpr.Use(a, RCMode::Read);
-  RCOpArg Rc = fpr.Use(c, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RCX64Reg Rc_duplicated = m_accurate_nans ? fpr.Scratch() : fpr.Scratch(XMM1);
-  RegCache::Realize(Ra, Rc, Rd, Rc_duplicated);
+  FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
+  FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCX64Reg Rc_duplicated = m_accurate_nans ? fpr.Scratch() : fpr.Scratch(XMM1);
+  FPURegCache::Realize(Ra, Rc, Rd, Rc_duplicated);
 
   switch (inst.SUBOP5)
   {
@@ -127,7 +127,7 @@ void Jit64::ps_mergeXX(UGeckoInstruction inst)
   RCOpArg Ra = fpr.Use(a, RCMode::Read);
   RCOpArg Rb = fpr.Use(b, RCMode::Read);
   RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(Ra, Rb, Rd);
+  FPURegCache::Realize(Ra, Rb, Rd);
 
   switch (inst.SUBOP10)
   {
@@ -162,10 +162,11 @@ void Jit64::ps_rsqrte(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  RCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  RCX64Reg Rb = fpr.Bind(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(scratch_guard, Rb, Rd);
+  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRegCache::Realize(scratch_guard);
+  FPURegCache::Realize(Rb, Rd);
 
   MOVSD(XMM0, Rb);
   CALL(asm_routines.frsqrte);
@@ -187,10 +188,11 @@ void Jit64::ps_res(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  RCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  RCX64Reg Rb = fpr.Bind(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(scratch_guard, Rb, Rd);
+  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRegCache::Realize(scratch_guard);
+  FPURegCache::Realize(Rb, Rd);
 
   MOVSD(XMM0, Rb);
   CALL(asm_routines.fres);

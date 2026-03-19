@@ -170,8 +170,8 @@ FixupBranch Jit64::HandleNaNs(UGeckoInstruction inst, X64Reg xmm, X64Reg clobber
     {
       // SSE2 fallback
 
-      RCX64Reg tmp = fpr.Scratch();
-      RegCache::Realize(tmp);
+      FPURCX64Reg tmp = fpr.Scratch();
+      FPURegCache::Realize(tmp);
       MOVAPD(clobber, R(xmm));
       CMPPD(clobber, R(clobber), CMP_UNORD);
       MOVMSKPD(RSCRATCH, R(clobber));
@@ -271,10 +271,10 @@ void Jit64::fp_arith(UGeckoInstruction inst)
     ASSERT_MSG(DYNA_REC, 0, "fp_arith WTF!!!");
   }
 
-  RCX64Reg Rd = fpr.Bind(d, !single ? RCMode::ReadWrite : RCMode::Write);
-  RCOpArg Ra = fpr.Use(a, RCMode::Read);
-  RCOpArg Rarg2 = fpr.Use(arg2, RCMode::Read);
-  RegCache::Realize(Rd, Ra, Rarg2);
+  FPURCX64Reg Rd = fpr.Bind(d, !single ? RCMode::ReadWrite : RCMode::Write);
+  FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
+  FPURCOpArg Rarg2 = fpr.Use(arg2, RCMode::Read);
+  FPURegCache::Realize(Rd, Ra, Rarg2);
 
   X64Reg dest = X64Reg(Rd);
   if (preserve_inputs && (a == d || arg2 == d))
@@ -409,29 +409,29 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
 
   BitSet32 scratch_registers{XMM0 + 16, XMM1 + 16};
 
-  RCX64Reg xmm2_guard;
-  RCX64Reg xmm3_guard;
+  FPURCX64Reg xmm2_guard;
+  FPURCX64Reg xmm3_guard;
   if (error_free_transformation)
   {
     xmm2_guard = fpr.Scratch(XMM2);
     xmm3_guard = fpr.Scratch(XMM3);
-    RegCache::Realize(xmm2_guard, xmm3_guard);
+    FPURegCache::Realize(xmm2_guard, xmm3_guard);
     scratch_registers[XMM2 + 16] = true;
     scratch_registers[XMM3 + 16] = true;
   }
   else if (software_fma)
   {
     xmm2_guard = fpr.Scratch(XMM2);
-    RegCache::Realize(xmm2_guard);
+    FPURegCache::Realize(xmm2_guard);
     scratch_registers[XMM2 + 16] = true;
   }
 
-  RCOpArg Ra;
-  RCOpArg Rb;
-  RCOpArg Rc;
-  RCX64Reg Rd;
-  RCX64Reg result_xmm_guard;
-  RCX64Reg Rc_duplicated_guard;
+  FPURCOpArg Ra;
+  FPURCOpArg Rb;
+  FPURCOpArg Rc;
+  FPURCX64Reg Rd;
+  FPURCX64Reg result_xmm_guard;
+  FPURCX64Reg Rc_duplicated_guard;
   if (software_fma)
   {
     Ra = packed || error_free_transformation ? fpr.Bind(a, RCMode::Read) : fpr.Use(a, RCMode::Read);
@@ -443,13 +443,13 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
     if (preserve_d && packed)
     {
       result_xmm_guard = fpr.Scratch();
-      RegCache::Realize(Ra, Rb, Rc, Rd, result_xmm_guard);
+      FPURegCache::Realize(Ra, Rb, Rc, Rd, result_xmm_guard);
       result_xmm = Gen::X64Reg(result_xmm_guard);
       scratch_registers[result_xmm + 16] = true;
     }
     else
     {
-      RegCache::Realize(Ra, Rb, Rc, Rd);
+      FPURegCache::Realize(Ra, Rb, Rc, Rd);
       result_xmm = packed ? Gen::X64Reg(Rd) : XMM0;
     }
   }
@@ -465,7 +465,7 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
              fpr.Bind(c, RCMode::Read) :
              fpr.Use(c, RCMode::Read);
     Rd = fpr.Bind(d, single ? RCMode::Write : RCMode::ReadWrite);
-    RegCache::Realize(Ra, Rb, Rc, Rd);
+    FPURegCache::Realize(Ra, Rb, Rc, Rd);
   }
 
   if (error_free_transformation_wants_rc_duplicated ||
@@ -473,7 +473,7 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
        ((!software_fma && !error_free_transformation) || (error_free_transformation && packed))))
   {
     Rc_duplicated_guard = fpr.Scratch();
-    RegCache::Realize(Rc_duplicated_guard);
+    FPURegCache::Realize(Rc_duplicated_guard);
     Rc_duplicated = Rc_duplicated_guard;
     scratch_registers[Rc_duplicated + 16] = true;
   }
@@ -840,9 +840,9 @@ void Jit64::fsign(UGeckoInstruction inst)
   int b = inst.FB;
   bool packed = inst.OPCD == 4;
 
-  RCOpArg src = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(src, Rd);
+  FPURCOpArg src = fpr.Use(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURegCache::Realize(src, Rd);
 
   switch (inst.SUBOP10)
   {
@@ -877,11 +877,11 @@ void Jit64::fselx(UGeckoInstruction inst)
 
   bool packed = inst.OPCD == 4;  // ps_sel
 
-  RCOpArg Ra = fpr.Use(a, RCMode::Read);
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCOpArg Rc = fpr.Use(c, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, packed ? RCMode::Write : RCMode::ReadWrite);
-  RegCache::Realize(Ra, Rb, Rc, Rd);
+  FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, packed ? RCMode::Write : RCMode::ReadWrite);
+  FPURegCache::Realize(Ra, Rb, Rc, Rd);
 
   XORPD(XMM0, R(XMM0));
   // This condition is very tricky; there's only one right way to handle both the case of
@@ -963,12 +963,12 @@ void Jit64::fmrx(UGeckoInstruction inst)
   if (d == b)
     return;
 
-  RCOpArg Rd = fpr.Use(d, RCMode::Write);
-  RegCache::Realize(Rd);
+  FPURCOpArg Rd = fpr.Use(d, RCMode::Write);
+  FPURegCache::Realize(Rd);
   if (Rd.IsSimpleReg())
   {
-    RCOpArg Rb = fpr.Use(b, RCMode::Read);
-    RegCache::Realize(Rb);
+    FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+    FPURegCache::Realize(Rb);
     // We have to use MOVLPD if b isn't loaded because "MOVSD reg, mem" sets the upper bits (64+)
     // to zero and we don't want that.
     if (!Rb.IsSimpleReg())
@@ -978,8 +978,8 @@ void Jit64::fmrx(UGeckoInstruction inst)
   }
   else
   {
-    RCOpArg Rb = fpr.Bind(b, RCMode::Read);
-    RegCache::Realize(Rb);
+    FPURCOpArg Rb = fpr.Bind(b, RCMode::Read);
+    FPURegCache::Realize(Rb);
     MOVSD(Rd, Rb.GetSimpleReg());
   }
 }
@@ -1008,9 +1008,9 @@ void Jit64::FloatCompare(UGeckoInstruction inst, bool upper)
     output[3 - (next.CRBB & 3)] |= 1 << dst;
   }
 
-  RCOpArg Ra = upper ? fpr.Bind(a, RCMode::Read) : fpr.Use(a, RCMode::Read);
-  RCX64Reg Rb = fpr.Bind(b, RCMode::Read);
-  RegCache::Realize(Ra, Rb);
+  FPURCOpArg Ra = upper ? fpr.Bind(a, RCMode::Read) : fpr.Use(a, RCMode::Read);
+  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
+  FPURegCache::Realize(Ra, Rb);
 
   if (fprf)
     AND(32, PPCSTATE(fpscr), Imm32(~FPCC_MASK));
@@ -1105,9 +1105,9 @@ void Jit64::fctiwx(UGeckoInstruction inst)
   int d = inst.RD;
   int b = inst.RB;
 
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(Rb, Rd);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURegCache::Realize(Rb, Rd);
 
   // Intel uses 0x80000000 as a generic error code while PowerPC uses clamping:
   //
@@ -1148,9 +1148,9 @@ void Jit64::frspx(UGeckoInstruction inst)
   int d = inst.FD;
   bool packed = js.op->fprIsDuplicated[b] && !cpu_info.bAtom;
 
-  RCOpArg Rb = fpr.Bind(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(Rb, Rd);
+  FPURCOpArg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURegCache::Realize(Rb, Rd);
 
   FinalizeSingleResult(Rd, Rb, packed, true);
 }
@@ -1164,10 +1164,11 @@ void Jit64::frsqrtex(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  RCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(scratch_guard, Rb, Rd);
+  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRegCache::Realize(scratch_guard);
+  FPURegCache::Realize(Rb, Rd);
 
   MOVAPD(XMM0, Rb);
   CALL(asm_routines.frsqrte);
@@ -1183,10 +1184,11 @@ void Jit64::fresx(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  RCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  RegCache::Realize(scratch_guard, Rb, Rd);
+  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
+  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRegCache::Realize(scratch_guard);
+  FPURegCache::Realize(Rb, Rd);
 
   MOVAPD(XMM0, Rb);
   CALL(asm_routines.fres);
