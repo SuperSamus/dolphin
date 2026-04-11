@@ -36,7 +36,7 @@ void Jit64::psq_stXX(UGeckoInstruction inst)
 
   FlushRegistersBeforeSlowAccess();
 
-  RCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  RCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
   GPRRCOpArg Ra = update ? gpr.Bind(a, RCMode::ReadWrite) : gpr.Use(a, RCMode::Read);
   GPRRCOpArg Rb = indexed ? gpr.Use(b, RCMode::Read) : GPRRCOpArg::Imm32((u32)offset);
   FPURCOpArg Rs = fpr.Use(s, RCMode::Read);
@@ -128,10 +128,10 @@ void Jit64::psq_lXX(UGeckoInstruction inst)
 
   FlushRegistersBeforeSlowAccess();
 
-  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  GPRRCX64Reg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
+  GPRRCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  GPRRCHostReg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
   GPRRCOpArg Rb = indexed ? gpr.Use(b, RCMode::Read) : GPRRCOpArg::Imm32((u32)offset);
-  FPURCX64Reg Rs = fpr.Bind(s, RCMode::Write);
+  FPURCHostReg Rs = fpr.Bind(s, RCMode::Write);
   GPRRegCache::Realize(scratch_guard, Ra, Rb);
   FPURegCache::Realize(Rs);
 
