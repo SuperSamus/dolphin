@@ -626,6 +626,7 @@ if(_M_X86_64)
     PowerPC/Jit64/RegCache/GPRRegCache.cpp
     PowerPC/Jit64/RegCache/GPRRegCache.h
     PowerPC/Jit64/RegCache/JitRegCache.h
+    PowerPC/Jit64/RegCache/x64RegCache.h
     PowerPC/Jit64/RegCache/RCMode.h
     PowerPC/Jit64Common/BlockCache.cpp
     PowerPC/Jit64Common/BlockCache.h

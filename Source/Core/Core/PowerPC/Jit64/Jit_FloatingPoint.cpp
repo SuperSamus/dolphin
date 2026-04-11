@@ -170,7 +170,7 @@ FixupBranch Jit64::HandleNaNs(UGeckoInstruction inst, X64Reg xmm, X64Reg clobber
     {
       // SSE2 fallback
 
-      FPURCX64Reg tmp = fpr.Scratch();
+      FPURCHostReg tmp = fpr.Scratch();
       FPURegCache::Realize(tmp);
       MOVAPD(clobber, R(xmm));
       CMPPD(clobber, R(clobber), CMP_UNORD);
@@ -271,7 +271,7 @@ void Jit64::fp_arith(UGeckoInstruction inst)
     ASSERT_MSG(DYNA_REC, 0, "fp_arith WTF!!!");
   }
 
-  FPURCX64Reg Rd = fpr.Bind(d, !single ? RCMode::ReadWrite : RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, !single ? RCMode::ReadWrite : RCMode::Write);
   FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
   FPURCOpArg Rarg2 = fpr.Use(arg2, RCMode::Read);
   FPURegCache::Realize(Rd, Ra, Rarg2);
@@ -409,8 +409,8 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
 
   BitSet32 scratch_registers{XMM0 + 16, XMM1 + 16};
 
-  FPURCX64Reg xmm2_guard;
-  FPURCX64Reg xmm3_guard;
+  FPURCHostReg xmm2_guard;
+  FPURCHostReg xmm3_guard;
   if (error_free_transformation)
   {
     xmm2_guard = fpr.Scratch(XMM2);
@@ -429,9 +429,9 @@ void Jit64::fmaddXX(UGeckoInstruction inst)
   FPURCOpArg Ra;
   FPURCOpArg Rb;
   FPURCOpArg Rc;
-  FPURCX64Reg Rd;
-  FPURCX64Reg result_xmm_guard;
-  FPURCX64Reg Rc_duplicated_guard;
+  FPURCHostReg Rd;
+  FPURCHostReg result_xmm_guard;
+  FPURCHostReg Rc_duplicated_guard;
   if (software_fma)
   {
     Ra = packed || error_free_transformation ? fpr.Bind(a, RCMode::Read) : fpr.Use(a, RCMode::Read);
@@ -841,7 +841,7 @@ void Jit64::fsign(UGeckoInstruction inst)
   bool packed = inst.OPCD == 4;
 
   FPURCOpArg src = fpr.Use(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(src, Rd);
 
   switch (inst.SUBOP10)
@@ -880,7 +880,7 @@ void Jit64::fselx(UGeckoInstruction inst)
   FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
   FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, packed ? RCMode::Write : RCMode::ReadWrite);
+  FPURCHostReg Rd = fpr.Bind(d, packed ? RCMode::Write : RCMode::ReadWrite);
   FPURegCache::Realize(Ra, Rb, Rc, Rd);
 
   XORPD(XMM0, R(XMM0));
@@ -1009,7 +1009,7 @@ void Jit64::FloatCompare(UGeckoInstruction inst, bool upper)
   }
 
   FPURCOpArg Ra = upper ? fpr.Bind(a, RCMode::Read) : fpr.Use(a, RCMode::Read);
-  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCHostReg Rb = fpr.Bind(b, RCMode::Read);
   FPURegCache::Realize(Ra, Rb);
 
   if (fprf)
@@ -1106,7 +1106,7 @@ void Jit64::fctiwx(UGeckoInstruction inst)
   int b = inst.RB;
 
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(Rb, Rd);
 
   // Intel uses 0x80000000 as a generic error code while PowerPC uses clamping:
@@ -1149,7 +1149,7 @@ void Jit64::frspx(UGeckoInstruction inst)
   bool packed = js.op->fprIsDuplicated[b] && !cpu_info.bAtom;
 
   FPURCOpArg Rb = fpr.Bind(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(Rb, Rd);
 
   FinalizeSingleResult(Rd, Rb, packed, true);
@@ -1164,9 +1164,9 @@ void Jit64::frsqrtex(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  GPRRCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   GPRRegCache::Realize(scratch_guard);
   FPURegCache::Realize(Rb, Rd);
 
@@ -1184,9 +1184,9 @@ void Jit64::fresx(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  GPRRCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   GPRRegCache::Realize(scratch_guard);
   FPURegCache::Realize(Rb, Rd);
 

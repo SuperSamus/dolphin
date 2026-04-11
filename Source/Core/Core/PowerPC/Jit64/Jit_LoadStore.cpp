@@ -138,7 +138,7 @@ void Jit64::lXXx(UGeckoInstruction inst)
   s32 loadOffset = 0;
 
   // Prepare result
-  GPRRCX64Reg Rd = jo.memcheck ? gpr.RevertableBind(d, RCMode::Write) : gpr.Bind(d, RCMode::Write);
+  GPRRCHostReg Rd = jo.memcheck ? gpr.RevertableBind(d, RCMode::Write) : gpr.Bind(d, RCMode::Write);
 
   // Prepare address operand
   GPRRCOpArg opAddress;
@@ -214,7 +214,7 @@ void Jit64::lXXx(UGeckoInstruction inst)
     }
   }
 
-  GPRRCX64Reg Ra = (update && storeAddress) ? gpr.Bind(a, RCMode::ReadWrite) : GPRRCX64Reg{};
+  GPRRCHostReg Ra = (update && storeAddress) ? gpr.Bind(a, RCMode::ReadWrite) : GPRRCHostReg{};
   GPRRegCache::Realize(opAddress, Ra, Rd);
 
   BitSet32 registersInUse = CallerSavedRegistersInUse();
@@ -248,10 +248,10 @@ void Jit64::dcbx(UGeckoInstruction inst)
                          js.op[2].inst.hex == 0x4200fff8;
 
   GPRRCOpArg Ra = inst.RA ? gpr.Use(inst.RA, RCMode::Read) : GPRRCOpArg::Imm32(0);
-  GPRRCX64Reg Rb = gpr.Bind(inst.RB, make_loop ? RCMode::ReadWrite : RCMode::Read);
+  GPRRCHostReg Rb = gpr.Bind(inst.RB, make_loop ? RCMode::ReadWrite : RCMode::Read);
   GPRRegCache::Realize(Ra, Rb);
 
-  GPRRCX64Reg loop_counter;
+  GPRRCHostReg loop_counter;
   if (make_loop)
   {
     // We'll execute somewhere between one single cacheline invalidation and however many are needed
@@ -261,8 +261,8 @@ void Jit64::dcbx(UGeckoInstruction inst)
     // bdnz afterwards! So if we invalidate a single cache line, we don't adjust the registers at
     // all, if we invalidate 2 cachelines we adjust the registers by one step, and so on.
 
-    GPRRCX64Reg reg_cycle_count = gpr.Scratch();
-    GPRRCX64Reg reg_downcount = gpr.Scratch();
+    GPRRCHostReg reg_cycle_count = gpr.Scratch();
+    GPRRCHostReg reg_downcount = gpr.Scratch();
     loop_counter = gpr.Scratch();
     GPRRegCache::Realize(reg_cycle_count, reg_downcount, loop_counter);
 
@@ -338,7 +338,7 @@ void Jit64::dcbx(UGeckoInstruction inst)
   }
 
   X64Reg tmp = RSCRATCH2;
-  GPRRCX64Reg effective_address = gpr.Scratch();
+  GPRRCHostReg effective_address = gpr.Scratch();
   GPRRegCache::Realize(effective_address);
 
   FixupBranch bat_lookup_failed;
@@ -553,7 +553,7 @@ void Jit64::stX(UGeckoInstruction inst)
   }
   else
   {
-    GPRRCX64Reg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
+    GPRRCHostReg Ra = gpr.Bind(a, update ? RCMode::ReadWrite : RCMode::Read);
     GPRRCOpArg reg_value;
     if (WriteClobbersRegValue(accessSize, /* swap */ true))
     {

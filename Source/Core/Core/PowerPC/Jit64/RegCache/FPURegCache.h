@@ -6,11 +6,12 @@
 #include <span>
 
 #include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
+#include "Core/PowerPC/Jit64/RegCache/x64RegCache.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
 
 class Jit64;
 
-class FPURegCacheImpl final
+class FPURegCacheImpl final : public X64RegCacheBase
 {
   friend class RegCache<FPURegCacheImpl>;
 
@@ -49,4 +50,4 @@ protected:
 
 using FPURegCache = RegCache<FPURegCacheImpl>;
 using FPURCOpArg = RCOpArg<FPURegCacheImpl>;
-using FPURCX64Reg = RCX64Reg<FPURegCacheImpl>;
+using FPURCHostReg = RCHostReg<FPURegCacheImpl>;

@@ -6,11 +6,12 @@
 #include <span>
 
 #include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
+#include "Core/PowerPC/Jit64/RegCache/x64RegCache.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
 
 class Jit64;
 
-class GPRRegCacheImpl final
+class GPRRegCacheImpl final : public X64RegCacheBase
 {
   friend class RegCache<GPRRegCacheImpl>;
   friend class GPRRegCache;
@@ -61,4 +62,4 @@ public:
 };
 
 using GPRRCOpArg = RCOpArg<GPRRegCacheImpl>;
-using GPRRCX64Reg = RCX64Reg<GPRRegCacheImpl>;
+using GPRRCHostReg = RCHostReg<GPRRegCacheImpl>;

@@ -24,7 +24,7 @@ void Jit64::ps_mr(UGeckoInstruction inst)
     return;
 
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(Rb, Rd);
   MOVAPD(Rd, Rb);
 }
@@ -44,7 +44,7 @@ void Jit64::ps_sum(UGeckoInstruction inst)
   FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
   FPURCOpArg Rb = fpr.Use(b, RCMode::Read);
   FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(Ra, Rb, Rc, Rd);
 
   X64Reg tmp = XMM1;
@@ -83,8 +83,8 @@ void Jit64::ps_muls(UGeckoInstruction inst)
 
   FPURCOpArg Ra = fpr.Use(a, RCMode::Read);
   FPURCOpArg Rc = fpr.Use(c, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
-  FPURCX64Reg Rc_duplicated = m_accurate_nans ? fpr.Scratch() : fpr.Scratch(XMM1);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
+  FPURCHostReg Rc_duplicated = m_accurate_nans ? fpr.Scratch() : fpr.Scratch(XMM1);
   FPURegCache::Realize(Ra, Rc, Rd, Rc_duplicated);
 
   switch (inst.SUBOP5)
@@ -126,7 +126,7 @@ void Jit64::ps_mergeXX(UGeckoInstruction inst)
 
   RCOpArg Ra = fpr.Use(a, RCMode::Read);
   RCOpArg Rb = fpr.Use(b, RCMode::Read);
-  RCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  RCHostReg Rd = fpr.Bind(d, RCMode::Write);
   FPURegCache::Realize(Ra, Rb, Rd);
 
   switch (inst.SUBOP10)
@@ -162,9 +162,9 @@ void Jit64::ps_rsqrte(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCHostReg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   GPRRegCache::Realize(scratch_guard);
   FPURegCache::Realize(Rb, Rd);
 
@@ -188,9 +188,9 @@ void Jit64::ps_res(UGeckoInstruction inst)
   int b = inst.FB;
   int d = inst.FD;
 
-  GPRRCX64Reg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
-  FPURCX64Reg Rb = fpr.Bind(b, RCMode::Read);
-  FPURCX64Reg Rd = fpr.Bind(d, RCMode::Write);
+  GPRRCHostReg scratch_guard = gpr.Scratch(RSCRATCH_EXTRA);
+  FPURCHostReg Rb = fpr.Bind(b, RCMode::Read);
+  FPURCHostReg Rd = fpr.Bind(d, RCMode::Write);
   GPRRegCache::Realize(scratch_guard);
   FPURegCache::Realize(Rb, Rd);
 

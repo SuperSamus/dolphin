@@ -64,7 +64,7 @@ void Jit64::lfXXX(UGeckoInstruction inst)
   }
 
   RCMode Rd_mode = !single ? RCMode::ReadWrite : RCMode::Write;
-  RCX64Reg Rd = jo.memcheck && single ? fpr.RevertableBind(d, Rd_mode) : fpr.Bind(d, Rd_mode);
+  RCHostReg Rd = jo.memcheck && single ? fpr.RevertableBind(d, Rd_mode) : fpr.Bind(d, Rd_mode);
   FPURegCache::Realize(Rd);
   BitSet32 registersInUse = CallerSavedRegistersInUse();
   if (update && jo.memcheck)
@@ -82,7 +82,7 @@ void Jit64::lfXXX(UGeckoInstruction inst)
   }
   if (update && jo.memcheck)
   {
-    RCX64Reg Ra = gpr.Bind(a, RCMode::Write);
+    RCHostReg Ra = gpr.Bind(a, RCMode::Write);
     GPRRegCache::Realize(Ra);
     MOV(32, Ra, addr);
   }
@@ -118,7 +118,7 @@ void Jit64::stfXXX(UGeckoInstruction inst)
     }
     else
     {
-      FPURCX64Reg Rs = fpr.Bind(s, RCMode::Read);
+      FPURCHostReg Rs = fpr.Bind(s, RCMode::Read);
       FPURegCache::Realize(Rs);
       MOVAPD(XMM0, Rs);
       CALL(asm_routines.cdts);

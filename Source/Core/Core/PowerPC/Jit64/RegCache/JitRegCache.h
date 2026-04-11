@@ -7,11 +7,15 @@
 #include <array>
 #include <cstddef>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
+#include "Common/Assert.h"
+#include "Common/CommonTypes.h"
 #include "Common/VariantUtil.h"
-#include "Common/x64Emitter.h"
 #include "Core/PowerPC/Jit64/RegCache/RCMode.h"
+
+#include "Common/x64Emitter.h"
 
 using preg_t = u8;
 
@@ -35,47 +39,18 @@ enum class FlushMode
 };
 
 template <typename T>
-concept RCacheImplementation =
-    true /*
-requires(T rc_impl, preg_t preg, const Gen::OpArg& new_loc, Gen::X64Reg xreg,
-IgnoreDiscardedRegisters ignore_discarded_registers, T::BitSetHost free_registers,
-u32 lookahead) {
-// TODO: Force the BitSet type to actually by a BitSet.
-{ T::NUM_HOST_REGS } -> std::convertible_to<size_t>;
-typename T::BitSetHost;
-{ T::NUM_GUEST_REGS } -> std::convertible_to<size_t>;
-typename T::BitSetGuest;
-{ rc_impl.IsImm(preg) } -> std::same_as<bool>;
-{ rc_impl.Imm32(preg) } -> std::same_as<u32>;
-{ rc_impl.SImm32(preg) } -> std::same_as<s32>;
-
-{ rc_impl.GetPPCStateLocation(preg) } -> std::same_as<Gen::OpArg>;
-{ rc_impl.StoreConstant(preg, new_loc) } -> std::same_as<void>;
-{ rc_impl.StoreRegister(xreg, new_loc) } -> std::same_as<void>;
-{ rc_impl.LoadConstant(preg, xreg) } -> std::same_as<void>;
-{ rc_impl.LoadFromPPCState(preg, xreg) } -> std::same_as<void>;
-{ rc_impl.DiscardImm(preg) } -> std::same_as<void>;
-
-{ rc_impl.GetAllocationOrder() } -> std::same_as<std::span<Gen::X64Reg>>;
-
-{ rc_impl.GetRegUtilization() } -> std::same_as<typename T::BitSetGuest>;
-{ rc_impl.JitNumInstructionsLeft() } -> std::same_as<int>;
-{ rc_impl.CountRegsIn(preg, lookahead) } -> std::same_as<typename T::BitSetGuest>;
-}*/;
-
-template <RCacheImplementation T>
 class RCOpArg;
-template <RCacheImplementation T>
-class RCX64Reg;
-template <RCacheImplementation T>
+template <typename T>
+class RCHostReg;
+template <typename T>
 class RegCache;
 
-template <RCacheImplementation T>
+template <typename T>
 class RCOpArg
 {
 public:
   static RCOpArg Imm32(u32 imm) { return RCOpArg{imm}; }
-  static RCOpArg R(Gen::X64Reg xr) { return RCOpArg{xr}; }
+  static RCOpArg R(T::HostReg hr) { return RCOpArg{hr}; }
   RCOpArg() = default;
   ~RCOpArg() { Unlock(); }
   RCOpArg(RCOpArg&& other) noexcept
@@ -92,13 +67,13 @@ public:
     return *this;
   }
 
-  RCOpArg(RCX64Reg<T>&& other) noexcept
+  RCOpArg(RCHostReg<T>&& other) noexcept
       : rc(std::exchange(other.rc, nullptr)),
         contents(VariantCast(std::exchange(other.contents, std::monostate{})))
   {
   }
 
-  RCOpArg& operator=(RCX64Reg<T>&& other) noexcept
+  RCOpArg& operator=(RCHostReg<T>&& other) noexcept
   {
     Unlock();
     rc = std::exchange(other.rc, nullptr);
@@ -117,16 +92,16 @@ public:
     }
   }
 
-  Gen::OpArg Location() const
+  T::OpArg Location() const
   {
     if (const preg_t* preg = std::get_if<preg_t>(&contents))
     {
       ASSERT(rc->IsRealized(*preg));
       return rc->R(*preg);
     }
-    else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+    else if (const typename T::HostReg* hr = std::get_if<typename T::HostReg>(&contents))
     {
-      return Gen::R(*xr);
+      return Gen::R(*hr);
     }
     else if (const u32* imm = std::get_if<u32>(&contents))
     {
@@ -136,11 +111,11 @@ public:
     return {};
   }
 
-  operator Gen::OpArg() const& { return Location(); }
-  operator Gen::OpArg() const&& = delete;
+  operator typename T::OpArg() const& { return Location(); }
+  operator typename T::OpArg() const&& = delete;
   bool IsSimpleReg() const { return Location().IsSimpleReg(); }
-  bool IsSimpleReg(Gen::X64Reg reg) const { return Location().IsSimpleReg(reg); }
-  Gen::X64Reg GetSimpleReg() const { return Location().GetSimpleReg(); }
+  bool IsSimpleReg(T::HostReg reg) const { return Location().IsSimpleReg(reg); }
+  T::HostReg GetSimpleReg() const { return Location().GetSimpleReg(); }
 
   void Unlock()
   {
@@ -149,12 +124,12 @@ public:
       ASSERT(rc);
       rc->Unlock(*preg);
     }
-    else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+    else if (const typename T::HostReg* hr = std::get_if<typename T::HostReg>(&contents))
     {
-      // If rc, we got this from an RCX64Reg.
+      // If rc, we got this from an RCHostReg.
       // If !rc, we got this from RCOpArg::R.
       if (rc)
-        rc->UnlockX(*xr);
+        rc->UnlockH(*hr);
     }
     else
     {
@@ -174,26 +149,26 @@ private:
   friend class RegCache<T>;
 
   explicit RCOpArg(u32 imm) : rc(nullptr), contents(imm) {}
-  explicit RCOpArg(Gen::X64Reg xr) : rc(nullptr), contents(xr) {}
+  explicit RCOpArg(T::HostReg hr) : rc(nullptr), contents(hr) {}
   RCOpArg(RegCache<T>* rc_, preg_t preg) : rc(rc_), contents(preg) { rc->Lock(preg); }
 
   RegCache<T>* rc = nullptr;
-  std::variant<std::monostate, Gen::X64Reg, u32, preg_t> contents;
+  std::variant<std::monostate, typename T::HostReg, u32, preg_t> contents;
 };
 
-template <RCacheImplementation T>
-class RCX64Reg
+template <typename T>
+class RCHostReg
 {
 public:
-  RCX64Reg() = default;
-  ~RCX64Reg() { Unlock(); }
-  RCX64Reg(RCX64Reg&& other) noexcept
+  RCHostReg() = default;
+  ~RCHostReg() { Unlock(); }
+  RCHostReg(RCHostReg&& other) noexcept
       : rc(std::exchange(other.rc, nullptr)),
         contents(std::exchange(other.contents, std::monostate{}))
   {
   }
 
-  RCX64Reg& operator=(RCX64Reg&& other) noexcept
+  RCHostReg& operator=(RCHostReg&& other) noexcept
   {
     Unlock();
     rc = std::exchange(other.rc, nullptr);
@@ -201,8 +176,8 @@ public:
     return *this;
   }
 
-  RCX64Reg(const RCX64Reg&) = delete;
-  RCX64Reg& operator=(const RCX64Reg&) = delete;
+  RCHostReg(const RCHostReg&) = delete;
+  RCHostReg& operator=(const RCHostReg&) = delete;
 
   void Realize()
   {
@@ -211,23 +186,23 @@ public:
       rc->Realize(*preg);
     }
   }
-  operator Gen::OpArg() const& { return Gen::R(operator Gen::X64Reg()); }
-  operator Gen::X64Reg() const&
+  operator typename T::OpArg() const& { return Gen::R(operator typename T::HostReg()); }
+  operator typename T::HostReg() const&
   {
     if (const preg_t* preg = std::get_if<preg_t>(&contents))
     {
       ASSERT(rc->IsRealized(*preg));
-      return rc->RX(*preg);
+      return rc->RH(*preg);
     }
-    else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+    else if (const typename T::HostReg* hr = std::get_if<typename T::HostReg>(&contents))
     {
-      return *xr;
+      return *hr;
     }
     ASSERT(false);
     return {};
   }
-  operator Gen::OpArg() const&& = delete;
-  operator Gen::X64Reg() const&& = delete;
+  operator typename T::OpArg() const&& = delete;
+  operator typename T::HostReg() const&& = delete;
 
   void Unlock()
   {
@@ -236,10 +211,10 @@ public:
       ASSERT(rc);
       rc->Unlock(*preg);
     }
-    else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+    else if (const typename T::HostReg* hr = std::get_if<typename T::HostReg>(&contents))
     {
       ASSERT(rc);
-      rc->UnlockX(*xr);
+      rc->UnlockH(*hr);
     }
     else
     {
@@ -254,12 +229,12 @@ private:
   friend class RegCache<T>;
   friend class RCOpArg<T>;
 
-  RCX64Reg(RegCache<T>* rc_, preg_t preg) : rc(rc_), contents(preg) { rc->Lock(preg); }
+  RCHostReg(RegCache<T>* rc_, preg_t preg) : rc(rc_), contents(preg) { rc->Lock(preg); }
 
-  RCX64Reg(RegCache<T>* rc_, Gen::X64Reg xr) : rc(rc_), contents(xr) { rc->LockX(xr); }
+  RCHostReg(RegCache<T>* rc_, T::HostReg hr) : rc(rc_), contents(hr) { rc->LockH(hr); }
 
   RegCache<T>* rc = nullptr;
-  std::variant<std::monostate, Gen::X64Reg, preg_t> contents;
+  std::variant<std::monostate, typename T::HostReg, preg_t> contents;
 };
 
 class RCConstraint
@@ -396,7 +371,7 @@ private:
   bool revertable = false;
 };
 
-template <RCacheImplementation T>
+template <typename T>
 class RegCache
 {
 public:
@@ -430,10 +405,10 @@ public:
 
     for (const preg_t i : m_guests_in_host_register)
     {
-      Gen::X64Reg xr = m_guests_host_register[i];
-      if (m_hosts_is_locked[xr])
+      typename T::HostReg hr = m_guests_host_register[i];
+      if (m_hosts_is_locked[hr])
         return false;
-      if (m_hosts_guest_reg[xr] != i)
+      if (m_hosts_guest_reg[hr] != i)
         return false;
     }
     return true;
@@ -442,14 +417,14 @@ public:
   template <typename... Ts>
   static void Realize(Ts&... rc)
   {
-    static_assert(((std::is_same<Ts, RCOpArg<T>>() || std::is_same<Ts, RCX64Reg<T>>()) && ...));
+    static_assert(((std::is_same<Ts, RCOpArg<T>>() || std::is_same<Ts, RCHostReg<T>>()) && ...));
     (rc.Realize(), ...);
   }
 
   template <typename... Ts>
   static void Unlock(Ts&... rc)
   {
-    static_assert(((std::is_same<Ts, RCOpArg<T>>() || std::is_same<Ts, RCX64Reg<T>>()) && ...));
+    static_assert(((std::is_same<Ts, RCOpArg<T>>() || std::is_same<Ts, RCHostReg<T>>()) && ...));
     (rc.Unlock(), ...);
   }
 
@@ -480,29 +455,29 @@ public:
     return RCOpArg{this, preg};
   }
 
-  RCX64Reg<T> Bind(preg_t preg, RCMode mode)
+  RCHostReg<T> Bind(preg_t preg, RCMode mode)
   {
     m_guests_constraints[preg].AddBind(mode);
-    return RCX64Reg{this, preg};
+    return RCHostReg{this, preg};
   }
 
-  RCX64Reg<T> RevertableBind(preg_t preg, RCMode mode)
+  RCHostReg<T> RevertableBind(preg_t preg, RCMode mode)
   {
     m_guests_constraints[preg].AddRevertableBind(mode);
-    return RCX64Reg{this, preg};
+    return RCHostReg{this, preg};
   }
 
-  RCX64Reg<T> Scratch() { return Scratch(GetFreeXReg()); }
+  RCHostReg<T> Scratch() { return Scratch(GetFreeHostReg()); }
 
-  RCX64Reg<T> Scratch(Gen::X64Reg xr)
+  RCHostReg<T> Scratch(T::HostReg hr)
   {
-    FlushX(xr);
-    return RCX64Reg{this, xr};
+    FlushX(hr);
+    return RCHostReg{this, hr};
   }
 
   void Discard(T::BitSetGuest pregs)
   {
-    ASSERT_MSG(DYNA_REC, !m_hosts_is_locked, "Someone forgot to unlock a X64 reg");
+    ASSERT_MSG(DYNA_REC, !m_hosts_is_locked, "Someone forgot to unlock a host reg");
     typename T::BitSetGuest locked_pregs = pregs & m_guests_is_locked;
     ASSERT_MSG(DYNA_REC, !locked_pregs, "Someone forgot to unlock the following PPC regs {:b}.",
                locked_pregs.m_val);
@@ -513,8 +488,8 @@ public:
 
     for (const preg_t i : (pregs & m_guests_in_host_register))
     {
-      Gen::X64Reg xr = m_guests_host_register[i];
-      m_hosts_free[xr] = true;
+      typename T::HostReg hr = m_guests_host_register[i];
+      m_hosts_free[hr] = true;
     }
 
     m_guests_in_ppc_state &= ~pregs;
@@ -542,8 +517,8 @@ public:
     {
       for (const preg_t i : (pregs & m_guests_in_host_register))
       {
-        Gen::X64Reg xr = m_guests_host_register[i];
-        m_hosts_free[xr] = true;
+        typename T::HostReg hr = m_guests_host_register[i];
+        m_hosts_free[hr] = true;
       }
     }
 
@@ -601,9 +576,9 @@ public:
 
 protected:
   friend class RCOpArg<T>;
-  friend class RCX64Reg<T>;
+  friend class RCHostReg<T>;
 
-  void FlushX(Gen::X64Reg reg)
+  void FlushX(T::HostReg reg)
   {
     ASSERT(!m_hosts_is_locked[reg]);
     if (!m_hosts_free[reg])
@@ -616,15 +591,15 @@ protected:
   {
     if (m_guests_in_host_register[preg])
     {
-      Gen::X64Reg xr = m_guests_host_register[preg];
-      m_hosts_free[xr] = true;
+      typename T::HostReg hr = m_guests_host_register[preg];
+      m_hosts_free[hr] = true;
     }
 
     m_guests_in_ppc_state[preg] = false;
     m_guests_in_host_register[preg] = false;
   }
 
-  void LoadRegister(preg_t preg, Gen::X64Reg new_loc)
+  void LoadRegister(preg_t preg, T::HostReg new_loc)
   {
     if (rc_impl.IsImm(preg))
     {
@@ -637,7 +612,7 @@ protected:
     }
   }
 
-  void StoreRegister(preg_t preg, const Gen::OpArg& new_loc,
+  void StoreRegister(preg_t preg, const T::OpArg& new_loc,
                      IgnoreDiscardedRegisters ignore_discarded_registers)
   {
     if (m_guests_in_host_register[preg])
@@ -659,25 +634,25 @@ protected:
   {
     if (!m_guests_in_host_register[i])
     {
-      Gen::X64Reg xr = GetFreeXReg();
+      typename T::HostReg hr = GetFreeHostReg();
 
-      ASSERT_MSG(DYNA_REC, !m_hosts_is_locked[xr], "GetFreeXReg returned locked register");
+      ASSERT_MSG(DYNA_REC, !m_hosts_is_locked[hr], "GetFreeHostReg returned locked register");
       ASSERT_MSG(DYNA_REC, !m_guests_revertable[i], "Invalid transaction state");
 
-      m_hosts_free[xr] = false;
-      m_hosts_guest_reg[xr] = i;
+      m_hosts_free[hr] = false;
+      m_hosts_guest_reg[hr] = i;
 
       if (doLoad)
-        LoadRegister(i, xr);
+        LoadRegister(i, hr);
 
       ASSERT_MSG(
           DYNA_REC,
           std::ranges::none_of(m_guests_in_host_register,
-                               [&](const auto& r) { return m_guests_host_register[r] == xr; }),
-          "Xreg {} already bound", std::to_underlying(xr));
+                               [&](const auto& r) { return m_guests_host_register[r] == hr; }),
+          "Host reg {} already bound", std::to_underlying(hr));
 
       m_guests_in_host_register[i] = true;
-      m_guests_host_register[i] = xr;
+      m_guests_host_register[i] = hr;
     }
     if (makeDirty)
     {
@@ -685,8 +660,8 @@ protected:
       rc_impl.DiscardImm(i);
     }
 
-    ASSERT_MSG(DYNA_REC, !m_hosts_is_locked[RX(i)],
-               "WTF, this reg ({} -> {}) should have been flushed", i, std::to_underlying(RX(i)));
+    ASSERT_MSG(DYNA_REC, !m_hosts_is_locked[RH(i)],
+               "WTF, this reg ({} -> {}) should have been flushed", i, std::to_underlying(RH(i)));
   }
 
   void StoreFromRegister(
@@ -709,11 +684,11 @@ protected:
       m_guests_in_ppc_state[i] = true;
   }
 
-  Gen::X64Reg FirstFreeRegister(const T::BitSetHost free_registers) const
+  T::HostReg FirstFreeRegister(const T::BitSetHost free_registers) const
   {
     // Force loop unrolling
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-      Gen::X64Reg result = Gen::INVALID_REG;
+      typename T::HostReg result = Gen::INVALID_REG;
       auto allocation_order = T::GetAllocationOrder();
       // Each iteration is forced to be checked in order
       ((free_registers[allocation_order[Is]] ? (result = allocation_order[Is], true) : false) ||
@@ -722,7 +697,7 @@ protected:
     }(std::make_index_sequence<T::GetAllocationOrder().size()>{});
   }
 
-  Gen::X64Reg GetFreeXReg()
+  T::HostReg GetFreeHostReg()
   {
     constexpr typename T::BitSetHost allocatable_registers = GetAllocatableRegisters();
     typename T::BitSetHost free_registers =
@@ -733,33 +708,33 @@ protected:
     // Okay, not found; run the register allocator heuristic and
     // figure out which register we should clobber.
     float min_score = std::numeric_limits<float>::max();
-    Gen::X64Reg best_xreg = Gen::INVALID_REG;
+    typename T::HostReg best_hreg = Gen::INVALID_REG;
     preg_t best_preg = 0;
     for (const preg_t i : allocatable_registers & ~m_hosts_is_locked)
     {
-      auto xreg = (Gen::X64Reg)i;
-      const preg_t preg = m_hosts_guest_reg[xreg];
+      auto hreg = (typename T::HostReg)i;
+      const preg_t preg = m_hosts_guest_reg[hreg];
       if (m_guests_is_locked[preg])
         continue;
 
-      const float score = ScoreRegister(xreg);
+      const float score = ScoreRegister(hreg);
       if (score < min_score)
       {
         min_score = score;
-        best_xreg = xreg;
+        best_hreg = hreg;
         best_preg = preg;
       }
     }
 
-    if (best_xreg != Gen::INVALID_REG)
+    if (best_hreg != -1)
     {
       StoreFromRegister(best_preg);
-      return best_xreg;
+      return best_hreg;
     }
 
     // Still no dice? Die!
     ASSERT_MSG(DYNA_REC, false, "Regcache ran out of regs");
-    return Gen::INVALID_REG;
+    return -1;
   }
 
   static consteval T::BitSetHost GetAllocatableRegisters()
@@ -777,9 +752,9 @@ protected:
 
   // Estimate roughly how bad it would be to de-allocate this register. Higher score
   // means more bad.
-  float ScoreRegister(Gen::X64Reg xreg) const
+  float ScoreRegister(T::HostReg hreg) const
   {
-    preg_t preg = m_hosts_guest_reg[xreg];
+    preg_t preg = m_hosts_guest_reg[hreg];
     float score = 0;
 
     // If it's not dirty, we don't need a store to write it back to the register file, so
@@ -807,7 +782,7 @@ protected:
     return score;
   }
 
-  Gen::OpArg R(preg_t preg) const
+  T::OpArg R(preg_t preg) const
   {
     if (m_guests_in_host_register[preg])
     {
@@ -824,7 +799,7 @@ protected:
     }
   }
 
-  Gen::X64Reg RX(preg_t preg) const
+  T::HostReg RH(preg_t preg) const
   {
     ASSERT_MSG(DYNA_REC, m_guests_in_host_register[preg], "Not in host register - {}", preg);
     return m_guests_host_register[preg];
@@ -847,17 +822,17 @@ protected:
     }
   }
 
-  void LockX(Gen::X64Reg xr)
+  void LockH(T::HostReg hr)
   {
-    ++m_hosts_locked[xr];
-    m_hosts_is_locked[xr] = true;
+    ++m_hosts_locked[hr];
+    m_hosts_is_locked[hr] = true;
   }
 
-  void UnlockX(Gen::X64Reg xr)
+  void UnlockH(T::HostReg hr)
   {
-    ASSERT(m_hosts_locked[xr] > 0 && m_hosts_is_locked[xr]);
-    --m_hosts_locked[xr];
-    m_hosts_is_locked[xr] = m_hosts_locked[xr] > 0;
+    ASSERT(m_hosts_locked[hr] > 0 && m_hosts_is_locked[hr]);
+    --m_hosts_locked[hr];
+    m_hosts_is_locked[hr] = m_hosts_locked[hr] > 0;
   }
 
   bool IsRealized(preg_t preg) const { return m_guests_constraints[preg].IsRealized(); }
@@ -918,7 +893,7 @@ protected:
   T::BitSetHost m_hosts_is_locked;
 
   T::BitSetGuest m_guests_in_ppc_state = T::BitSetGuest::AllTrue();
-  std::array<Gen::X64Reg, T::NUM_GUEST_REGS> m_guests_host_register{};
+  std::array<typename T::HostReg, T::NUM_GUEST_REGS> m_guests_host_register{};
   T::BitSetGuest m_guests_in_host_register;
   T::BitSetGuest m_guests_revertable;
   std::array<u8, T::NUM_GUEST_REGS> m_guests_locked = {};
