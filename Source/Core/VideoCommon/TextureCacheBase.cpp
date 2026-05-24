@@ -1486,8 +1486,6 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
         // The reason why this is an option is because it's unsafely assuming that the game is
         // indeed not using the garbage data.
         //
-        // TODO: Does the texture cache hit textures of the wrong size? If not, than this should be
-        // done *after* searching in the texture cache.
         // TODO: Are there games getting a EFB texture smaller than its actual size?
         // TODO: Should we check texture_info.GetRawWidth() % entry->ActualWidth() == 0? (Maybe only
         // when upscaling?)
@@ -1602,21 +1600,30 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
     ++iter;
   }
 
-  if (processable_copy != m_textures_by_address.end())
+  const auto ProcessEntry = [&]() -> std::shared_ptr<TCacheEntry> {
+    if (processable_copy != m_textures_by_address.end())
+    {
+      auto entry = processable_copy->second;
+
+      if (processable_needs_reinterpretation)
+        entry = ReinterpretEntry(entry, texture_info.GetTextureFormat());
+
+      if (processable_needs_conversion && entry)
+        entry =
+            ApplyPaletteToEntry(entry, texture_info.GetTlutAddress(), texture_info.GetTlutFormat());
+
+      if (processable_needs_resizing && entry)
+        entry = ResizeEntry(entry, texture_info.GetRawWidth(), texture_info.GetRawHeight(),
+                            base_hash, full_hash);
+      return entry;
+    }
+    return {};
+  };
+  // A texture that needs resizing should only be considered after failing a search in the texture
+  // cache.
+  if (!processable_needs_resizing)
   {
-    auto entry = processable_copy->second;
-
-    if (processable_needs_reinterpretation)
-      entry = ReinterpretEntry(entry, texture_info.GetTextureFormat());
-
-    if (processable_needs_conversion && entry)
-      entry =
-          ApplyPaletteToEntry(entry, texture_info.GetTlutAddress(), texture_info.GetTlutFormat());
-
-    if (processable_needs_resizing && entry)
-      entry = ResizeEntry(entry, texture_info.GetRawWidth(), texture_info.GetRawHeight(), base_hash,
-                          full_hash);
-
+    auto entry = ProcessEntry();
     if (entry)
       return entry;
   }
@@ -1651,6 +1658,13 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
       }
       ++hash_iter;
     }
+  }
+
+  if (processable_needs_resizing)
+  {
+    auto entry = ProcessEntry();
+    if (entry)
+      return entry;
   }
 
   // If at least one entry was not used for the same frame, overwrite the oldest one
