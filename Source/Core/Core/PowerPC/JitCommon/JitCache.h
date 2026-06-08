@@ -51,6 +51,7 @@ struct JitBlockData
   // This tracks the position of this block within the fast block cache.
   // We only allow each block to have one map entry.
   size_t fast_block_map_index;
+  bool dirty_pc;
 };
 static_assert(std::is_standard_layout_v<JitBlockData>, "JitBlockData must have a standard layout");
 
