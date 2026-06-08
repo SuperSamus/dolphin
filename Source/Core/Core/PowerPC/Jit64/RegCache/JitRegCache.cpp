@@ -296,9 +296,9 @@ RCX64Reg RegCache::Scratch()
   return Scratch(GetFreeXReg());
 }
 
-RCX64Reg RegCache::Scratch(X64Reg xr)
+RCX64Reg RegCache::Scratch(X64Reg xr, bool force_full_flush)
 {
-  FlushX(xr);
+  FlushX(xr, force_full_flush);
   return RCX64Reg{this, xr};
 }
 
@@ -389,6 +389,23 @@ void RegCache::PreloadRegisters(BitSet32 to_preload)
   }
 }
 
+void RegCache::InBlockBranchPreloadRegisters(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    BindToRegister(preg, true, false, regs);
+  }
+}
+
+void RegCache::ForceDirty(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    m_regs[preg].SetDirty();
+    DiscardImm(preg);
+  }
+}
+
 BitSet16 RegCache::RegistersInUse() const
 {
   BitSet16 result;
@@ -400,14 +417,17 @@ BitSet16 RegCache::RegistersInUse() const
   return result;
 }
 
-void RegCache::FlushX(X64Reg reg)
+void RegCache::FlushX(X64Reg reg, bool force_full_flush)
 {
   ASSERT_MSG(DYNA_REC, reg < m_xregs.size(), "Flushing non-existent reg {}",
              std::to_underlying(reg));
   ASSERT(!m_xregs[reg].IsLocked());
   if (!m_xregs[reg].IsFree())
   {
-    StoreFromRegister(m_xregs[reg].Contents());
+    const preg_t preg = m_xregs[reg].Contents();
+    StoreFromRegister(preg, (!force_full_flush && m_regs[preg].IsLocked()) ?
+                                RegCache::FlushMode::Undirty :
+                                RegCache::FlushMode::Full);
   }
 }
 
@@ -422,11 +442,21 @@ void RegCache::DiscardRegister(preg_t preg)
   m_regs[preg].SetDiscarded();
 }
 
-void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
+void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty, BitSet32 preserve_pregs)
 {
+  std::optional<X64Reg> fixed_xr = m_regs[i].GetFixedHost();
   if (!m_regs[i].IsInHostRegister())
   {
-    X64Reg xr = GetFreeXReg();
+    X64Reg xr;
+    if (fixed_xr)
+    {
+      xr = *m_regs[i].GetFixedHost();
+      FlushX(xr);
+    }
+    else
+    {
+      xr = GetFreeXReg(preserve_pregs);
+    }
 
     ASSERT_MSG(DYNA_REC, !m_xregs[xr].IsLocked(), "GetFreeXReg returned locked register");
     ASSERT_MSG(DYNA_REC, !m_regs[i].IsRevertable(), "Invalid transaction state");
@@ -447,6 +477,10 @@ void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
   }
   else
   {
+    const X64Reg xr = m_regs[i].GetHostRegister();
+    ASSERT_MSG(DYNA_REC, !fixed_xr.has_value() || xr == fixed_xr,
+               "PPC Reg {} is fixed to X64 Reg {}, yet is bound to X64 Reg {}", i,
+               std::to_underlying(*fixed_xr), std::to_underlying(xr));
     // reg location must be simplereg; memory locations
     // and immediates are taken care of above.
     if (makeDirty)
@@ -475,7 +509,7 @@ void RegCache::StoreFromRegister(preg_t i, FlushMode mode,
   m_regs[i].SetFlushed(mode != FlushMode::Full);
 }
 
-X64Reg RegCache::GetFreeXReg()
+X64Reg RegCache::GetFreeXReg(BitSet32 preserve_pregs)
 {
   const auto order = GetAllocationOrder();
   for (const X64Reg xr : order)
@@ -491,8 +525,10 @@ X64Reg RegCache::GetFreeXReg()
   size_t best_preg = 0;
   for (const X64Reg xreg : order)
   {
+    if (m_xregs[xreg].IsLocked())
+      continue;
     const preg_t preg = m_xregs[xreg].Contents();
-    if (m_xregs[xreg].IsLocked() || m_regs[preg].IsLocked())
+    if (m_regs[preg].IsLocked() || preserve_pregs[preg])
       continue;
 
     const float score = ScoreRegister(xreg);
@@ -513,6 +549,24 @@ X64Reg RegCache::GetFreeXReg()
   // Still no dice? Die!
   ASSERT_MSG(DYNA_REC, false, "Regcache ran out of regs");
   return INVALID_REG;
+}
+
+void RegCache::FixHostRegisters(BitSet32 pregs)
+{
+  for (preg_t i : pregs)
+  {
+    ASSERT_MSG(DYNA_REC, m_regs[i].IsInHostRegister(),
+               "Attmepting to fix PPC reg {} while it isn't bound to any X64 reg.", i);
+    m_regs[i].SetFixedHost(m_regs[i].GetHostRegister());
+  }
+}
+
+void RegCache::UnfixHostRegisters()
+{
+  for (auto& preg : m_regs)
+  {
+    preg.UnsetFixedHost();
+  }
 }
 
 int RegCache::NumFreeRegisters() const

@@ -365,6 +365,8 @@ void Jit64::Shutdown()
 
 void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
 {
+  // TODO: This is incompatible with in-block branches, due to flushing.
+
   FlushCarry();
   gpr.Flush(BitSet32(0xFFFFFFFF), RegCache::FlushMode::Full,
             RegCache::IgnoreDiscardedRegisters::Yes);
@@ -433,6 +435,7 @@ void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
 
 void Jit64::HLEFunction(u32 hook_index)
 {
+  // Also this
   gpr.Flush();
   fpr.Flush();
   ABI_PushRegistersAndAdjustStack({}, 0);
@@ -604,6 +607,25 @@ void Jit64::WriteExit(u32 destination, bool bl, u32 after)
   SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
 
   JustWriteExit(destination, bl, after);
+}
+
+void Jit64::WriteInBlockExit(u32 destination)
+{
+  SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+
+  FixupBranch do_timing = J_CC(CC_LE, Jump::Near);
+  SwitchToFarCode();
+  SetJumpTarget(do_timing);
+  MOV(32, PPCSTATE(pc), Imm32(destination));
+  {
+    RCForkGuard gpr_guard = gpr.Fork();
+    RCForkGuard fpr_guard = fpr.Fork();
+    gpr.Flush();
+    fpr.Flush();
+  }
+  Cleanup();
+  JMP(asm_routines.do_timing, true);
+  SwitchToNearCode();
 }
 
 void Jit64::JustWriteExit(u32 destination, bool bl, u32 after)
@@ -833,6 +855,8 @@ void Jit64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
         analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_BRANCH_MERGE);
         analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_CROR_MERGE);
         analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_CARRY_MERGE);
+        analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_FORWARD_JUMP);
+        analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_COMPLEX_BLOCK);
         analyzer.ClearOption(PPCAnalyst::PPCAnalyzer::OPTION_BRANCH_FOLLOW);
       }
       Trace();
@@ -1034,6 +1058,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       js.isLastInstruction = true;
     }
 
+    // If true, don't interfere with register cache.
+    const bool are_branches_in_block = TryPrepareInBlockBranches(op);
     if (i != 0)
     {
       // Gather pipe writes using a non-immediate address are discovered by profiling.
@@ -1108,6 +1134,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       if (IsDebuggingEnabled() && power_pc.GetBreakPoints().IsAddressBreakPoint(op.address) &&
           !cpu.IsStepping())
       {
+        // TODO
         gpr.Flush();
         fpr.Flush();
 
@@ -1127,6 +1154,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SetJumpTarget(noBreakpoint);
       }
 
+      // TODO: Gotta handle this...
       if ((opinfo->flags & FL_USE_FPU) && !js.firstFPInstructionFound)
       {
         // This instruction uses FPU - needs to add FP exception bailout
@@ -1168,7 +1196,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
 
         if (!constant_propagation_result.instruction_fully_executed)
         {
-          if (!bJITRegisterCacheOff)
+          // TODO: Should this extra consition be kept?
+          if (!bJITRegisterCacheOff && !are_branches_in_block)
           {
             // If we have an input register that is going to be used again, load it pre-emptively,
             // even if the instruction doesn't strictly need it in a register, to avoid redundant
@@ -1250,18 +1279,24 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       gpr.Commit();
       fpr.Commit();
 
-      // If we have a register that will never be used again, discard or flush it.
-      if (!bJITRegisterCacheOff)
+      // Note: it might have been false earlier, then became true due to a merged instruction.
+      if (!IsInBlockBranchActive())
       {
-        gpr.Discard(op.gprDiscardable);
-        fpr.Discard(op.fprDiscardable);
+        // If we have a register that will never be used again, discard or flush it.
+        if (!bJITRegisterCacheOff)
+        {
+          // TODO: This is too hard to handle for now. (Maybe register analysis should be done by
+          // the Analyzer...)
+          // gpr.Discard(op.gprDiscardable);
+          // fpr.Discard(op.fprDiscardable);
+        }
+        gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten) & (op.regsIn | op.regsOut),
+                  RegCache::FlushMode::Full);
+        fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten) & (op.fregsIn | op.GetFregsOut()),
+                  RegCache::FlushMode::Full);
+        gpr.Flush(~op.gprWillBeWritten & op.regsOut, RegCache::FlushMode::Undirty);
+        fpr.Flush(~op.fprWillBeWritten & op.GetFregsOut(), RegCache::FlushMode::Undirty);
       }
-      gpr.Flush(~(op.gprWillBeRead | op.gprWillBeWritten) & (op.regsIn | op.regsOut),
-                RegCache::FlushMode::Full);
-      fpr.Flush(~(op.fprWillBeRead | op.fprWillBeWritten) & (op.fregsIn | op.GetFregsOut()),
-                RegCache::FlushMode::Full);
-      gpr.Flush(~op.gprWillBeWritten & op.regsOut, RegCache::FlushMode::Undirty);
-      fpr.Flush(~op.fprWillBeWritten & op.GetFregsOut(), RegCache::FlushMode::Undirty);
 
       if (opinfo->flags & FL_LOADSTORE)
         ++js.numLoadStoreInst;
@@ -1280,6 +1315,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     i += js.skipInstructions;
     js.skipInstructions = 0;
   }
+
+  EndInBlockBranch();
 
   if (code_block.m_broken)
   {
@@ -1353,6 +1390,8 @@ void Jit64::EnableOptimization()
   analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_BRANCH_MERGE);
   analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_CROR_MERGE);
   analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_CARRY_MERGE);
+  analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_FORWARD_JUMP);
+  analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_COMPLEX_BLOCK);
   analyzer.SetOption(PPCAnalyst::PPCAnalyzer::OPTION_BRANCH_FOLLOW);
 }
 
@@ -1393,6 +1432,7 @@ void Jit64::IntializeSpeculativeConstants()
 
 void Jit64::FlushRegistersBeforeSlowAccess()
 {
+  // TODO: This is incompatible with in-block branches, due to flushing.
   // Register values can be used by memory watchpoint conditions.
   MemChecks& mem_checks = m_system.GetPowerPC().GetMemChecks();
   if (mem_checks.HasAny())

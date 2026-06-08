@@ -480,3 +480,13 @@ void Jit64::CompileInstruction(PPCAnalyst::CodeOp& op)
 
   PPCTables::CountInstructionCompile(op.opinfo, js.compilerPC);
 }
+
+bool Jit64::IsFallbackToInterpreter(const UGeckoInstruction inst)
+{
+  // TODO: Great hardcoding, very maintainable!
+  return inst.OPCD == 31 &&
+         (inst.SUBOP10 == 150 || inst.SUBOP10 == 20 || inst.SUBOP10 == 533 || inst.SUBOP10 == 597 ||
+          inst.SUBOP10 == 661 || inst.SUBOP10 == 725 || inst.SUBOP10 == 210 ||
+          inst.SUBOP10 == 242 || inst.SUBOP10 == 595 || inst.SUBOP10 == 659 ||
+          inst.SUBOP10 == 982 || inst.SUBOP10 == 310 || inst.SUBOP10 == 438 || inst.SUBOP10 == 306);
+}

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 
 #include "Common/Assert.h"
 #include "Common/x64Reg.h"
@@ -62,6 +63,13 @@ public:
     m_revertable = false;
   }
 
+  // Get which host register this register is forced to be bound to.
+  std::optional<Gen::X64Reg> GetFixedHost() { return m_fixed_host_register; }
+  // Force this register to be bound by the chosen host register.
+  void SetFixedHost(Gen::X64Reg xreg) { m_fixed_host_register = xreg; }
+  // Allow this register to be bound to any host register again.
+  void UnsetFixedHost() { m_fixed_host_register = std::nullopt; }
+
   bool IsLocked() const { return m_locked > 0; }
   void Lock() { m_locked++; }
   void Unlock()
@@ -74,6 +82,7 @@ private:
   Gen::X64Reg m_host_register{};
   bool m_in_ppc_state = true;
   bool m_in_host_register = false;
+  std::optional<Gen::X64Reg> m_fixed_host_register;
   bool m_revertable = false;
   size_t m_locked = 0;
 };
