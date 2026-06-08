@@ -93,6 +93,10 @@ void EmuCodeBlock::SwitchToNearCode()
 
 void EmuCodeBlock::FlushPCBeforeSlowAccess()
 {
+  // If this wasn't done, then some graphical glitches would occur.
+  // E.g. Skylanders: Spyro's Adventure character models would suffer vertex explosions.
+  m_jit.js.curBlock->dirty_pc = true;
+
   // PC is used by memory watchpoints (if enabled), profiling where to insert gather pipe
   // interrupt checks, and printing accurate PC locations in debug logs.
   MOV(32, PPCSTATE(pc), Imm32(m_jit.js.compilerPC));

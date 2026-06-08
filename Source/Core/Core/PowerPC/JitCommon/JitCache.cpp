@@ -138,6 +138,7 @@ JitBlock* JitBaseBlockCache::AllocateBlock(u32 em_address)
   b.feature_flags = m_jit.m_ppc_state.feature_flags;
   b.linkData.clear();
   b.fast_block_map_index = 0;
+  b.dirty_pc = false;
   return &b;
 }
 

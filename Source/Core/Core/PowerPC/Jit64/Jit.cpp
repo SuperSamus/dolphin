@@ -598,7 +598,8 @@ void Jit64::JustWriteExit(u32 destination, bool bl, u32 after)
   linkData.linkStatus = false;
   linkData.call = bl;
 
-  MOV(32, PPCSTATE(pc), Imm32(destination));
+  if (destination != b->effectiveAddress || b->dirty_pc)
+    MOV(32, PPCSTATE(pc), Imm32(destination));
 
   // Perform downcount flag check, followed by the requested exit
   if (bl)
@@ -699,7 +700,10 @@ void Jit64::WriteIdleExit(u32 destination)
   ABI_PushRegistersAndAdjustStack({}, 0);
   ABI_CallFunction(CoreTiming::GlobalIdle);
   ABI_PopRegistersAndAdjustStack({}, 0);
-  MOV(32, PPCSTATE(pc), Imm32(destination));
+
+  JitBlock* b = js.curBlock;
+  if (destination != b->effectiveAddress || b->dirty_pc)
+    MOV(32, PPCSTATE(pc), Imm32(destination));
   WriteExceptionExit();
 }
 

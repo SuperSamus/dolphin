@@ -589,7 +589,8 @@ void JitArm64::WriteExit(u32 destination, bool LK, u32 exit_address_after_return
   if (switch_to_far_code)
     SwitchToFarCode();
   DEBUG_ASSERT(GetCodePtr() == primary_farcode_addr || HasWriteFailed());
-  MOVI2R(DISPATCHER_PC, destination);
+  if (destination != js.blockStart)
+    MOVI2R(DISPATCHER_PC, destination);
   if (LK)
     BL(GetAsmRoutines()->do_timing);
   else
@@ -819,7 +820,8 @@ void JitArm64::WriteBLRExit(Arm64Gen::ARM64Reg dest)
 
 void JitArm64::WriteExceptionExit(u32 destination, bool only_external, bool always_exception)
 {
-  MOVI2R(DISPATCHER_PC, destination);
+  if (destination != js.blockStart)
+    MOVI2R(DISPATCHER_PC, destination);
   WriteExceptionExit(DISPATCHER_PC, only_external, always_exception);
 }
 
