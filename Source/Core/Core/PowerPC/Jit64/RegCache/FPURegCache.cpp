@@ -3,6 +3,7 @@
 
 #include "Core/PowerPC/Jit64/RegCache/FPURegCache.h"
 
+#include "Common/BitSet.h"
 #include "Common/x64Reg.h"
 #include "Core/PowerPC/Jit64/Jit.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
@@ -16,6 +17,11 @@ FPURegCache::FPURegCache(Jit64& jit) : RegCache{jit}
 bool FPURegCache::IsImm(preg_t preg) const
 {
   return false;
+}
+
+BitSet32 FPURegCache::GetImmSet() const
+{
+  return BitSet32{};
 }
 
 u32 FPURegCache::Imm32(preg_t preg) const
@@ -73,6 +79,11 @@ std::span<const X64Reg> FPURegCache::GetAllocationOrder() const
   static constexpr X64Reg allocation_order[] = {XMM6,  XMM7,  XMM8,  XMM9, XMM10, XMM11, XMM12,
                                                 XMM13, XMM14, XMM15, XMM2, XMM3,  XMM4,  XMM5};
   return allocation_order;
+}
+
+size_t FPURegCache::GetMaxPreloadableRegisters() const
+{
+  return GetAllocationOrder().size();
 }
 
 OpArg FPURegCache::GetDefaultLocation(preg_t preg) const

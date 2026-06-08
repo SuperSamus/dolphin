@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <iosfwd>
 #include <map>
+#include <optional>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -20,6 +22,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/MachineContext.h"
 #include "Core/PowerPC/CPUCoreBase.h"
+#include "Core/PowerPC/Jit64/RegCache/JitRegCache.h"
 #include "Core/PowerPC/JitCommon/JitAsmCommon.h"
 #include "Core/PowerPC/JitCommon/JitCache.h"
 #include "Core/PowerPC/PPCAnalyst.h"
@@ -58,6 +61,13 @@ class PPCSymbolDB;
 
 #define JITDISABLE(setting) FALLBACK_IF(bJITOff || setting)
 
+#ifdef _M_X86_64
+using FixupBranch = Gen::FixupBranch;
+#endif
+#ifdef _M_ARM_64
+using FixupBranch = Arm64Gen::FixupBranch;
+#endif
+
 class JitBase : public CPUCoreBase
 {
 protected:
@@ -90,6 +100,24 @@ protected:
     bool memcheck;
     bool fp_exceptions;
     bool div_by_zero_exceptions;
+  };
+  struct InBlockBranchStatus
+  {
+    std::optional<size_t> ends_at = std::nullopt;  // If nullopt, then it's inactive. Othwerwise,
+    // it's active until the specified instruction.
+
+    std::vector<size_t> optimized_branches_i;
+    BitSet32 regsIn;
+    BitSet32 regsOut;
+    BitSet32 fregsIn;
+    BitSet32 fregsOut;
+    // With merged branches, it's desirable to flush before the test/cmp, but some registers may be
+    // locked. In that case, flush them with MaintainState, and finish them later.
+    BitSet32 regsToFinishFlushing;
+    // TODO: With how small these are, it'd be better to use a vector for the same functionality (as
+    // being O(N) is better than being O(1)).
+    std::unordered_map<size_t, FixupBranch> forward_fixups;
+    std::unordered_map<size_t, const u8*> backwards_addresses;
   };
   struct JitState
   {
@@ -128,6 +156,7 @@ protected:
 
     JitBlock* curBlock;
 
+    InBlockBranchStatus inBlockBranchStatus;
     std::unordered_set<u32> fifoWriteAddresses;
     std::unordered_set<u32> pairedQuantizeAddresses;
     std::unordered_set<u32> noSpeculativeConstantsAddresses;

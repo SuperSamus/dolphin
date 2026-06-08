@@ -190,6 +190,32 @@ FixupBranch Jit64::JumpIfCRFieldBit(int field, int bit, bool jump_if_set)
   return FixupBranch();
 }
 
+// TODO: Maybe the previous one should return the CCFlag instead of making a separate function?
+void Jit64::JumpIfCRFieldBit(int field, int bit, const u8* destination, bool jump_if_set)
+{
+  switch (bit)
+  {
+  case PowerPC::CR_SO_BIT:  // check bit 59 set
+    BT(64, CROffset(field), Imm8(PowerPC::CR_EMU_SO_BIT));
+    return J_CC(jump_if_set ? CC_C : CC_NC, destination);
+
+  case PowerPC::CR_EQ_BIT:  // check bits 31-0 == 0
+    CMP(32, CROffset(field), Imm8(0));
+    return J_CC(jump_if_set ? CC_Z : CC_NZ, destination);
+
+  case PowerPC::CR_GT_BIT:  // check val > 0
+    CMP(64, CROffset(field), Imm8(0));
+    return J_CC(jump_if_set ? CC_G : CC_LE, destination);
+
+  case PowerPC::CR_LT_BIT:  // check bit 62 set
+    BT(64, CROffset(field), Imm8(PowerPC::CR_EMU_LT_BIT));
+    return J_CC(jump_if_set ? CC_C : CC_NC, destination);
+
+  default:
+    ASSERT_MSG(DYNA_REC, false, "Invalid CR bit");
+  }
+}
+
 // Could be done with one temp register, but with two temp registers it's faster
 void Jit64::UpdateFPExceptionSummary(X64Reg fpscr, X64Reg tmp1, X64Reg tmp2)
 {
