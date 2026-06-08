@@ -160,8 +160,10 @@ public:
   }
 
   virtual bool IsImm(preg_t preg) const = 0;
+  virtual BitSet32 GetImmSet() const = 0;
   virtual u32 Imm32(preg_t preg) const = 0;
   virtual s32 SImm32(preg_t preg) const = 0;
+  virtual size_t GetMaxPreloadableRegisters() const = 0;
 
   bool IsBound(preg_t preg) const { return m_regs[preg].IsInHostRegister(); }
 
@@ -171,19 +173,35 @@ public:
   RCX64Reg Bind(preg_t preg, RCMode mode);
   RCX64Reg RevertableBind(preg_t preg, RCMode mode);
   RCX64Reg Scratch();
-  RCX64Reg Scratch(Gen::X64Reg xr);
+  RCX64Reg Scratch(Gen::X64Reg xr, bool force_full_flush = true);
 
   RCForkGuard Fork();
   void Discard(BitSet32 pregs);
-  void Flush(BitSet32 pregs = BitSet32::AllTrue(32),
+  void Flush(BitSet32 pregs = BitSet32::AllTrue(32), FlushMode mode = FlushMode::Full,
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
+  /// Has no effect on register state. Meant for instructions that end the block but could be jumped
+  /// over.
+  // TODO: Use it in more places?
+  void FlushEnd();
   void Reset(BitSet32 pregs);
+
+  /// Fix the X64 regs to the selected PPC regs, so that if they are unbound, they will be forced to
+  /// be bound to the same X64 reg.
+  void FixHostRegisters(BitSet32 pregs);
+  // void FixCustomHostRegisters(std::array<X64CachedReg, 32> xregs); // For the day someone makes a
+  // more sophisticated register allocator.
+
+  /// Make all PPC regs able to be bound to any X64 reg again.
+  void UnfixHostRegisters();
+
   void RevertStaged();
   void CommitStaged();
 
   bool IsAllUnlocked() const;
 
   void PreloadRegisters(BitSet32 pregs);
+  void InBlockBranchPreloadRegisters(BitSet32 regs);
+  void ForceDirty(BitSet32 regs);
   BitSet32 RegistersInUse() const;
 
 protected:
@@ -202,14 +220,15 @@ protected:
   virtual BitSet32 GetRegUtilization() const = 0;
   virtual BitSet32 CountRegsIn(preg_t preg, u32 lookahead) const = 0;
 
-  void FlushX(Gen::X64Reg reg);
+  void FlushX(Gen::X64Reg reg, bool force_full_flush = true);
   void DiscardRegister(preg_t preg);
-  void BindToRegister(preg_t preg, bool doLoad = true, bool makeDirty = true);
+  void BindToRegister(preg_t preg, bool doLoad = true, bool makeDirty = true,
+                      BitSet32 preserve_pregs = {});
   void StoreFromRegister(
       preg_t preg, FlushMode mode = FlushMode::Full,
       IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
 
-  Gen::X64Reg GetFreeXReg();
+  Gen::X64Reg GetFreeXReg(BitSet32 preserve_pregs = {});
 
   int NumFreeRegisters() const;
   float ScoreRegister(Gen::X64Reg xreg) const;

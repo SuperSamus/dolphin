@@ -44,6 +44,7 @@
     <ClCompile Include="Core\PowerPC\Jit64\Jit_Branch.cpp" />
     <ClCompile Include="Core\PowerPC\Jit64\Jit_FloatingPoint.cpp" />
     <ClCompile Include="Core\PowerPC\Jit64\Jit_Integer.cpp" />
+    <ClCompile Include="Core\PowerPC\Jit64\Jit_InBlockBranch.cpp" />
     <ClCompile Include="Core\PowerPC\Jit64\Jit_LoadStore.cpp" />
     <ClCompile Include="Core\PowerPC\Jit64\Jit_LoadStoreFloating.cpp" />
     <ClCompile Include="Core\PowerPC\Jit64\Jit_LoadStorePaired.cpp" />

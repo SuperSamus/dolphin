@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <limits>
+#include <variant>
 
 #include "Common/Assert.h"
 #include "Common/CPUDetect.h"
@@ -182,20 +183,43 @@ void Jit64::ComputeRC(preg_t preg, bool needs_test, bool needs_sext)
 
   if (CheckMergedBranch(0))
   {
+    // All preparations regarding register flushing and allocation are better done here.
+    // Flushing early means we don't have to flush cmp/rc operands on both sides of the branch.
+    // Plus, if a test is used, we don't want instructions in between because they would interrupt
+    // macro-op fusion.
+    // TODO: It would be nice to properly set this up before the instruction that sets the carry...
+
+    // TODO: Remove condition when Analyzer blah blah
+    if (!IsInBlockBranchActive())
+    {
+      // The operand is locked, so maintain the register state for now: finish it in
+      // DoMergedBranchCondition.
+      gpr.Flush(~js.op->gprInUse, RegCache::FlushMode::MaintainState);
+    }
+    // TODO: this is a horrible way to SUB here in case of a forward branch (you don't want to do it
+    // after the flag is set). It sucks. Downcount management should be completely redesigned.
+    // (Also, note that this is calling TryPrepareInBlockBranches.)
+    if (std::holds_alternative<FixupBranch*>(TryInBlockBranch(js.op[1], BitSet32{(int)preg})))
+    {
+      if (needs_test)
+      {
+        SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+      }
+      else
+      {
+        // TODO: Shittiest workaround ever to avoid setting flags...
+        MOV(32, R(RSCRATCH), PPCSTATE(downcount));
+        LEA(32, RSCRATCH, MDisp(RSCRATCH, -js.downcountAmount));
+        MOV(32, PPCSTATE(downcount), R(RSCRATCH));
+      }
+    }
+
     if (needs_test)
     {
       TEST(32, arg, arg);
-      arg.Unlock();
     }
-    else
-    {
-      // If an operand to the cmp/rc op we're merging with the branch isn't used anymore, it'd be
-      // better to flush it here so that we don't have to flush it on both sides of the branch.
-      // We don't want to do this if a test is needed though, because it would interrupt macro-op
-      // fusion.
-      arg.Unlock();
-      gpr.Flush(~js.op->gprInUse);
-    }
+    arg.Unlock();
+
     DoMergedBranchCondition();
   }
 }
@@ -430,54 +454,118 @@ void Jit64::DoMergedBranchCondition()
   js.skipInstructions = 1;
   const UGeckoInstruction& next = js.op[1].inst;
   int test_bit = 3 - (next.BI & 3);
-  bool condition = !!(next.BO & BO_BRANCH_IF_TRUE);
+
   const u32 nextPC = js.op[1].address;
 
   ASSERT(gpr.IsAllUnlocked());
 
-  FixupBranch pDontBranch;
-  switch (test_bit)
+  // TODO: Remove condition when Analyzer blah blah
+  if (!IsInBlockBranchActive())
   {
-  case PowerPC::CR_LT_BIT:
-    // Test < 0, so jump over if >= 0.
-    pDontBranch = J_CC(condition ? CC_GE : CC_L, Jump::Near);
-    break;
-  case PowerPC::CR_GT_BIT:
-    // Test > 0, so jump over if <= 0.
-    pDontBranch = J_CC(condition ? CC_LE : CC_G, Jump::Near);
-    break;
-  case PowerPC::CR_EQ_BIT:
-    // Test = 0, so jump over if != 0.
-    pDontBranch = J_CC(condition ? CC_NE : CC_E, Jump::Near);
-    break;
-  case PowerPC::CR_SO_BIT:
-    // SO bit, do not branch (we don't emulate SO for cmp).
-    pDontBranch = J(Jump::Near);
-    break;
+    // Finish flushing from the register state.
+    gpr.Flush(~js.op->gprInUse);
   }
 
+  // Note that the enabling from the caller of DoMergedBranchCondition might have failed due to the
+  // locked registers.
+  auto in_block_branch = TryInBlockBranch(js.op[1]);
+  if (std::holds_alternative<std::monostate>(in_block_branch))
   {
-    RCForkGuard gpr_guard = gpr.Fork();
-    RCForkGuard fpr_guard = fpr.Fork();
+    // TODO: Should be called be the callers of DoMergedBranchCondition, not here.
+    // Jump over if the condition is false.
+    const bool condition = !(next.BO & BO_BRANCH_IF_TRUE);
 
-    gpr.Flush();
-    fpr.Flush();
+    FixupBranch pDontBranch;
+    switch (test_bit)
+    {
+    case PowerPC::CR_LT_BIT:
+      pDontBranch = J_CC(condition ? CC_L : CC_GE, Jump::Near);
+      break;
+    case PowerPC::CR_GT_BIT:
+      pDontBranch = J_CC(condition ? CC_G : CC_LE, Jump::Near);
+      break;
+    case PowerPC::CR_EQ_BIT:
+      pDontBranch = J_CC(condition ? CC_E : CC_NE, Jump::Near);
+      break;
+    case PowerPC::CR_SO_BIT:
+      // SO bit, do not branch (we don't emulate SO for cmp).
+      pDontBranch = J(Jump::Near);
+      break;
+    }
 
-    DoMergedBranch();
-  }
+    {
+      RCForkGuard gpr_guard = gpr.Fork();
+      RCForkGuard fpr_guard = fpr.Fork();
 
-  SetJumpTarget(pDontBranch);
+      gpr.Flush();
+      fpr.Flush();
 
-  if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
-  {
-    gpr.Flush();
-    fpr.Flush();
-    WriteBranchWatch<false>(nextPC, nextPC + 4, next, {});
-    WriteExit(nextPC + 4);
+      DoMergedBranch();
+    }
+
+    SetJumpTarget(pDontBranch);
+
+    if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
+    {
+      gpr.FlushEnd();
+      fpr.FlushEnd();
+      WriteBranchWatch<false>(nextPC, nextPC + 4, next, {});
+      WriteExit(nextPC + 4);
+    }
+    else
+    {
+      WriteBranchWatch<false>(nextPC, nextPC + 4, next, CallerSavedRegistersInUse());
+    }
   }
   else
   {
-    WriteBranchWatch<false>(nextPC, nextPC + 4, next, CallerSavedRegistersInUse());
+    if (FixupBranch** fixup = std::get_if<FixupBranch*>(&in_block_branch))
+    {
+      const bool condition = next.BO & BO_BRANCH_IF_TRUE;
+      switch (test_bit)
+      {
+      case PowerPC::CR_LT_BIT:
+        **fixup = J_CC(condition ? CC_L : CC_GE, Jump::Near);
+        break;
+      case PowerPC::CR_GT_BIT:
+        **fixup = J_CC(condition ? CC_G : CC_LE, Jump::Near);
+        break;
+      case PowerPC::CR_EQ_BIT:
+        **fixup = J_CC(condition ? CC_E : CC_NE, Jump::Near);
+        break;
+      case PowerPC::CR_SO_BIT:
+        // SO bit, do not branch (we don't emulate SO for cmp).
+        **fixup = J(Jump::Near);
+        break;
+      }
+      js.downcountAmount = 0;
+    }
+    else if (const u8** destination = std::get_if<const u8*>(&in_block_branch))
+    {
+      const bool condition = !(next.BO & BO_BRANCH_IF_TRUE);
+      FixupBranch pDontBranch;
+      switch (test_bit)
+      {
+      case PowerPC::CR_LT_BIT:
+        pDontBranch = J_CC(condition ? CC_L : CC_GE);
+        break;
+      case PowerPC::CR_GT_BIT:
+        pDontBranch = J_CC(condition ? CC_G : CC_LE);
+        break;
+      case PowerPC::CR_EQ_BIT:
+        pDontBranch = J_CC(condition ? CC_E : CC_NE);
+        break;
+      case PowerPC::CR_SO_BIT:
+        // TODO
+        // SO bit, do not branch (we don't emulate SO for cmp).
+        JMP(*destination);
+        break;
+      }
+      WriteInBlockExit(js.op[1].branchTo);
+      JMP(*destination);
+      SetJumpTarget(pDontBranch);
+      SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+    }
   }
 }
 
@@ -511,14 +599,14 @@ void Jit64::DoMergedBranchImmediate(s64 val)
 
   if (branch)
   {
-    gpr.Flush();
-    fpr.Flush();
+    gpr.FlushEnd();
+    fpr.FlushEnd();
     DoMergedBranch();
   }
   else if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
   {
-    gpr.Flush();
-    fpr.Flush();
+    gpr.FlushEnd();
+    fpr.FlushEnd();
     WriteBranchWatch<false>(nextPC, nextPC + 4, next, {});
     WriteExit(nextPC + 4);
   }
@@ -535,6 +623,7 @@ void Jit64::cmpXX(UGeckoInstruction inst)
   JITDISABLE(bJITIntegerOff);
   int a = inst.RA;
   int b = inst.RB;
+  const BitSet32 ab = BitSet32{a, b};
   u32 crf = inst.CRFD;
   bool merge_branch = CheckMergedBranch(crf);
 
@@ -588,6 +677,29 @@ void Jit64::cmpXX(UGeckoInstruction inst)
     }
 
     return;
+  }
+
+  if (merge_branch)
+  {
+    // All preparations regarding register flushing and allocation are better done here.
+    // Flushing early means we don't have to flush cmp/rc operands on both sides of the branch.
+    // Plus, if a test is used, we don't want instructions in between because they would interrupt
+    // macro-op fusion.
+
+    // TODO: Remove condition when Analyzer blah blah
+    if (!IsInBlockBranchActive())
+    {
+      // The operand is locked, so maintain the register state for now: finish it in
+      // DoMergedBranchCondition.
+      gpr.Flush(~js.op->gprInUse, RegCache::FlushMode::MaintainState);
+    }
+    // TODO: this is a horrible way to SUB here in case of a forward branch (you don't want to do it
+    // after the flag is set). It sucks. Downcount management should be completely redesigned.
+    // (Also, note that this is calling TryPrepareInBlockBranches.)
+    if (std::holds_alternative<FixupBranch*>(TryInBlockBranch(js.op[1], BitSet32{ab})))
+    {
+      SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+    }
   }
 
   if (!gpr.IsImm(a) && !signedCompare && comparand.IsImm() && comparand.Imm32() == 0)
@@ -2541,8 +2653,8 @@ void Jit64::twX(UGeckoInstruction inst)
     OR(32, PPCSTATE(Exceptions), Imm32(EXCEPTION_PROGRAM));
     MOV(32, PPCSTATE_SRR1, Imm32(static_cast<u32>(ProgramExceptionCause::Trap)));
 
-    gpr.Flush();
-    fpr.Flush();
+    gpr.FlushEnd();
+    fpr.FlushEnd();
 
     MOV(32, PPCSTATE(pc), Imm32(js.compilerPC));
     WriteExceptionExit();
@@ -2552,8 +2664,8 @@ void Jit64::twX(UGeckoInstruction inst)
 
   if (!analyzer.HasOption(PPCAnalyst::PPCAnalyzer::OPTION_CONDITIONAL_CONTINUE))
   {
-    gpr.Flush();
-    fpr.Flush();
+    gpr.FlushEnd();
+    fpr.FlushEnd();
     WriteExit(js.compilerPC + 4);
   }
 }

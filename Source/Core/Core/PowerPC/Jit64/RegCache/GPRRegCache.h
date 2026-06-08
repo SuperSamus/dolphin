@@ -13,10 +13,12 @@ public:
   explicit GPRRegCache(Jit64& jit);
 
   bool IsImm(preg_t preg) const override;
+  BitSet32 GetImmSet() const override;
   u32 Imm32(preg_t preg) const override;
   s32 SImm32(preg_t preg) const override;
 
   void SetImmediate32(preg_t preg, u32 imm_value, bool dirty = true);
+  size_t GetMaxPreloadableRegisters() const override;
 
 protected:
   Gen::OpArg R(preg_t preg) const override;

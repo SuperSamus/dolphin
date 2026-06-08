@@ -18,6 +18,11 @@ bool GPRRegCache::IsImm(preg_t preg) const
   return m_jit.GetConstantPropagation().HasGPR(preg);
 }
 
+BitSet32 GPRRegCache::GetImmSet() const
+{
+  return m_jit.GetConstantPropagation().GetAllGPR();
+}
+
 u32 GPRRegCache::Imm32(preg_t preg) const
 {
   ASSERT(m_jit.GetConstantPropagation().HasGPR(preg));
@@ -102,6 +107,12 @@ std::span<const X64Reg> GPRRegCache::GetAllocationOrder() const
 #endif
   };
   return allocation_order;
+}
+
+size_t GPRRegCache::GetMaxPreloadableRegisters() const
+{
+  // RCX needs to be reserved, as it is sometimes used as scratch
+  return GetAllocationOrder().size() - 1;
 }
 
 void GPRRegCache::SetImmediate32(preg_t preg, u32 imm_value, bool dirty)

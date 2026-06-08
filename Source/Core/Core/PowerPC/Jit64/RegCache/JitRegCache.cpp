@@ -304,9 +304,9 @@ RCX64Reg RegCache::Scratch()
   return Scratch(GetFreeXReg());
 }
 
-RCX64Reg RegCache::Scratch(X64Reg xr)
+RCX64Reg RegCache::Scratch(X64Reg xr, bool force_full_flush)
 {
-  FlushX(xr);
+  FlushX(xr, force_full_flush);
   return RCX64Reg{this, xr};
 }
 
@@ -321,11 +321,21 @@ void RegCache::Discard(BitSet32 pregs)
     DiscardRegister(i);
 }
 
-void RegCache::Flush(BitSet32 pregs, IgnoreDiscardedRegisters ignore_discarded_registers)
+void RegCache::Flush(BitSet32 pregs, FlushMode mode,
+                     IgnoreDiscardedRegisters ignore_discarded_registers)
 {
   for (preg_t i : pregs)
   {
-    StoreFromRegister(i, FlushMode::Full, ignore_discarded_registers);
+    StoreFromRegister(i, mode, ignore_discarded_registers);
+  }
+}
+
+void RegCache::FlushEnd()
+{
+  for (size_t i = 0; i < m_regs.size(); i++)
+  {
+    if (!m_regs[i].IsInDefaultLocation())
+      StoreRegister(i, GetDefaultLocation(i), IgnoreDiscardedRegisters::No);
   }
 }
 
@@ -374,6 +384,23 @@ void RegCache::PreloadRegisters(BitSet32 to_preload)
   }
 }
 
+void RegCache::InBlockBranchPreloadRegisters(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    BindToRegister(preg, true, false, regs);
+  }
+}
+
+void RegCache::ForceDirty(BitSet32 regs)
+{
+  for (preg_t preg : regs)
+  {
+    m_regs[preg].SetDirty();
+    DiscardImm(preg);
+  }
+}
+
 BitSet32 RegCache::RegistersInUse() const
 {
   BitSet32 result;
@@ -385,11 +412,14 @@ BitSet32 RegCache::RegistersInUse() const
   return result;
 }
 
-void RegCache::FlushX(X64Reg reg)
+void RegCache::FlushX(X64Reg reg, bool force_full_flush)
 {
   if (m_xregs[reg].Contents().has_value())
   {
-    StoreFromRegister(m_xregs[reg].Contents().value());
+    const preg_t preg = m_xregs[reg].Contents().value();
+    StoreFromRegister(preg, (!force_full_flush && m_regs[preg].IsLocked()) ?
+                                RegCache::FlushMode::MaintainState :
+                                RegCache::FlushMode::Full);
   }
 }
 
@@ -404,11 +434,22 @@ void RegCache::DiscardRegister(preg_t preg)
   m_regs[preg].SetDiscarded();
 }
 
-void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
+void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty, BitSet32 preserve_pregs)
 {
+  std::optional<X64Reg> fixed_xr = m_regs[i].GetFixedHost();
   if (!m_regs[i].IsInHostRegister())
   {
-    X64Reg xr = GetFreeXReg();
+    X64Reg xr;
+    if (fixed_xr)
+    {
+      xr = *m_regs[i].GetFixedHost();
+      FlushX(xr);
+    }
+    else
+    {
+      xr = GetFreeXReg(preserve_pregs);
+    }
+
     m_xregs[xr].SetBoundTo(i);
 
     if (doLoad)
@@ -425,6 +466,10 @@ void RegCache::BindToRegister(preg_t i, bool doLoad, bool makeDirty)
   }
   else
   {
+    X64Reg xr = m_regs[i].GetHostRegister().value();
+    ASSERT_MSG(DYNA_REC, !fixed_xr.has_value() || xr == fixed_xr,
+               "PPC Reg {} is fixed to X64 Reg {}, yet is bound to X64 Reg {}", i,
+               Common::ToUnderlying(*fixed_xr), Common::ToUnderlying(xr));
     // reg location must be simplereg; memory locations
     // and immediates are taken care of above.
     if (makeDirty)
@@ -449,7 +494,7 @@ void RegCache::StoreFromRegister(preg_t i, FlushMode mode,
   m_regs[i].SetFlushed(mode != FlushMode::Full);
 }
 
-X64Reg RegCache::GetFreeXReg()
+X64Reg RegCache::GetFreeXReg(BitSet32 preserve_pregs)
 {
   const auto order = GetAllocationOrder();
   for (const X64Reg xr : order)
@@ -468,7 +513,7 @@ X64Reg RegCache::GetFreeXReg()
     if (m_xregs[xreg].IsLocked())
       continue;
     const preg_t preg = m_xregs[xreg].Contents().value();
-    if (m_regs[preg].IsLocked())
+    if (m_regs[preg].IsLocked() || preserve_pregs[preg])
       continue;
 
     const float score = ScoreRegister(xreg);
@@ -489,6 +534,24 @@ X64Reg RegCache::GetFreeXReg()
   // Still no dice? Die!
   ASSERT_MSG(DYNA_REC, false, "Regcache ran out of regs");
   return INVALID_REG;
+}
+
+void RegCache::FixHostRegisters(BitSet32 pregs)
+{
+  for (preg_t i : pregs)
+  {
+    ASSERT_MSG(DYNA_REC, m_regs[i].IsInHostRegister(),
+               "Attmepting to fix PPC reg {} while it isn't bound to any X64 reg.", i);
+    m_regs[i].SetFixedHost(m_regs[i].GetHostRegister().value());
+  }
+}
+
+void RegCache::UnfixHostRegisters()
+{
+  for (auto& preg : m_regs)
+  {
+    preg.UnsetFixedHost();
+  }
 }
 
 int RegCache::NumFreeRegisters() const
