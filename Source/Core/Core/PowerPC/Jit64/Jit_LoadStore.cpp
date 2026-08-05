@@ -355,12 +355,12 @@ void Jit64::dcbx(UGeckoInstruction inst)
   }
 
   // Check whether a JIT cache line needs to be invalidated.
-  SHR(32, R(addr), Imm8(5 + 5));  // >> 5 for cache line size, >> 5 for width of bitset
+  SHR(32, R(addr), Imm8(5 + 6));  // >> 5 for cache line size, >> 6 for width of bitset
   MOV(64, R(tmp), ImmPtr(GetBlockCache()->GetBlockBitSet()));
-  MOV(32, R(addr), MComplex(tmp, addr, SCALE_4, 0));
+  MOV(64, R(addr), MComplex(tmp, addr, SCALE_8, 0));
   MOV(32, R(tmp), R(effective_address));
   SHR(32, R(tmp), Imm8(5));
-  BT(32, R(addr), R(tmp));
+  BT(64, R(addr), R(tmp));
   FixupBranch invalidate_needed = J_CC(CC_C, Jump::Near);
 
   if (make_loop)

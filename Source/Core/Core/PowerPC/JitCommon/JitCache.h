@@ -4,7 +4,6 @@
 #pragma once
 
 #include <array>
-#include <bitset>
 #include <chrono>
 #include <cstring>
 #include <functional>
@@ -16,8 +15,8 @@
 #include <vector>
 
 #include "Common/CommonTypes.h"
+#include "Common/MemArena.h"
 #include "Common/RangeSet.h"
-#include "Core/HW/Memmap.h"
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/PPCAnalyst.h"
 
@@ -110,36 +109,60 @@ struct JitBlock : public JitBlockData
   std::unique_ptr<ProfileData> profile_data;
 };
 
-typedef void (*CompiledCode)();
+using CompiledCode = void (*)();
 
-// This is essentially just an std::bitset, but Visual Studia 2013's
-// implementation of std::bitset is slow.
+// This is essentially just an std::bitset, but since the implementation isn't stable we must define
+// our own.
 class ValidBlockBitSet final
 {
+private:
+  static constexpr u32 BIT_SIZE = 64;
+
+  // ValidBlockBitSet covers the whole 32-bit address-space in 64-byte chunks.
+  // FIXME: Maybe we can get away with less? There isn't any actual RAM in most of this space.
+  static constexpr u64 VALID_BLOCK_MASK_SIZE = (1ULL << 32) / BIT_SIZE;
+  // The number of elements in the allocated array.
+  static constexpr u64 VALID_BLOCK_ALLOC_ELEMENTS = VALID_BLOCK_MASK_SIZE / BIT_SIZE;
+
 public:
-  enum
-  {
-    // ValidBlockBitSet covers the whole 32-bit address-space in 32-byte
-    // chunks.
-    // FIXME: Maybe we can get away with less? There isn't any actual
-    // RAM in most of this space.
-    VALID_BLOCK_MASK_SIZE = (1ULL << 32) / 32,
-    // The number of elements in the allocated array. Each u32 contains 32 bits.
-    VALID_BLOCK_ALLOC_ELEMENTS = VALID_BLOCK_MASK_SIZE / 32
-  };
   // Directly accessed by Jit64.
-  std::unique_ptr<u32[]> m_valid_block;
+  std::unique_ptr<std::array<u64, VALID_BLOCK_ALLOC_ELEMENTS>> m_valid_block =
+      std::make_unique<std::array<u64, VALID_BLOCK_ALLOC_ELEMENTS>>();
 
-  ValidBlockBitSet()
+  void Set(u32 bit) { (*m_valid_block)[bit / BIT_SIZE] |= 1L << (bit % BIT_SIZE); }
+  void Clear(u32 bit) { (*m_valid_block)[bit / BIT_SIZE] &= ~(1L << (bit % BIT_SIZE)); }
+  void ClearRange(u32 start, u32 end)
   {
-    m_valid_block.reset(new u32[VALID_BLOCK_ALLOC_ELEMENTS]);
-    ClearAll();
-  }
+    if (end <= start)
+    {
+      return;
+    }
 
-  void Set(u32 bit) { m_valid_block[bit / 32] |= 1u << (bit % 32); }
-  void Clear(u32 bit) { m_valid_block[bit / 32] &= ~(1u << (bit % 32)); }
-  void ClearAll() { memset(m_valid_block.get(), 0, sizeof(u32) * VALID_BLOCK_ALLOC_ELEMENTS); }
-  bool Test(u32 bit) const { return (m_valid_block[bit / 32] & (1u << (bit % 32))) != 0; }
+    const u32 i_start = start / BIT_SIZE;
+    const u32 m_start = start % BIT_SIZE;
+    const u32 i_end = end / BIT_SIZE;
+    const u32 m_end = end % BIT_SIZE;
+    if (i_start == i_end)
+    {
+      (*m_valid_block)[i_start] &= ~((1L << m_end) - (1L << m_start));
+    }
+    else
+    {
+      if (m_start != 0)
+        (*m_valid_block)[i_start] &= ULONG_MAX << m_start;
+      for (u32 i = i_start + 1; i < i_end; ++i)
+      {
+        (*m_valid_block)[i] = 0;
+      }
+      if (m_end != 0)
+        (*m_valid_block)[i_end] &= ~(ULONG_MAX << m_end);
+    }
+  }
+  void ClearAll() { m_valid_block->fill(0); }
+  bool Test(u32 bit) const
+  {
+    return ((*m_valid_block)[bit / BIT_SIZE] & (1u << (bit % BIT_SIZE))) != 0;
+  }
 };
 
 class JitBaseBlockCache
@@ -187,7 +210,7 @@ public:
   void ErasePhysicalRange(u32 address, u32 length);
   void EraseSingleBlock(const JitBlock& block);
 
-  u32* GetBlockBitSet() const;
+  u64* GetBlockBitSet() const;
 
 protected:
   virtual void DestroyBlock(JitBlock& block);

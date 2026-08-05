@@ -813,21 +813,22 @@ void JitArm64::dcbx(UGeckoInstruction inst)
         BATAddressLookup(physical_addr, effective_addr, WA, m_mmu.GetIBATTable().data());
     BFI(physical_addr, effective_addr, 0, PowerPC::BAT_INDEX_SHIFT);
     // Check whether a JIT cache line needs to be invalidated.
-    LSR(physical_addr, physical_addr, 5 + 5);  // >> 5 for cache line size, >> 5 for width of bitset
+    LSR(physical_addr, physical_addr, 5 + 6);  // >> 5 for cache line size, >> 6 for width of bitset
   }
   else
   {
-    LSR(physical_addr, effective_addr, 5 + 5);
+    LSR(physical_addr, effective_addr, 5 + 6);
   }
 
   MOVP2R(EncodeRegTo64(WA), GetBlockCache()->GetBlockBitSet());
   LDR(physical_addr, EncodeRegTo64(WA), ArithOption(EncodeRegTo64(physical_addr), true));
 
-  LSR(WA, effective_addr, 5);  // mask sizeof cacheline, & 0x1f is the position within the bitset
+  LSR(WA, effective_addr, 5);  // mask sizeof cacheline, & 0x3f is the position within the bitset
 
-  LSRV(physical_addr, physical_addr, WA);  // move current bit to bit 0
+  LSRV(EncodeRegTo64(physical_addr), EncodeRegTo64(physical_addr),
+       EncodeRegTo64(WA));  // move current bit to bit 0
 
-  FixupBranch bit_not_set = TBZ(physical_addr, 0);
+  FixupBranch bit_not_set = TBZ(EncodeRegTo64(physical_addr), 0);
   FixupBranch invalidate_needed = B();
   SetJumpTarget(bit_not_set);
 

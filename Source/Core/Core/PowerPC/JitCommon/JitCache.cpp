@@ -9,7 +9,6 @@
 #include <functional>
 #include <map>
 #include <ranges>
-#include <set>
 #include <span>
 #include <utility>
 
@@ -323,8 +322,7 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
     // cleared regions.
     const u32 covered_block_start = (physical_address + 0x1f) / 32;
     const u32 covered_block_end = (physical_address + length) / 32;
-    for (u32 i = covered_block_start; i < covered_block_end; ++i)
-      valid_block.Clear(i);
+    valid_block.ClearRange(covered_block_start, covered_block_end);
   }
 
   if (destroy_block)
@@ -422,9 +420,9 @@ void JitBaseBlockCache::EraseSingleBlock(const JitBlock& block)
   block_map.erase(block_map_iter);  // The original JitBlock reference is now dangling.
 }
 
-u32* JitBaseBlockCache::GetBlockBitSet() const
+u64* JitBaseBlockCache::GetBlockBitSet() const
 {
-  return valid_block.m_valid_block.get();
+  return valid_block.m_valid_block->begin();
 }
 
 void JitBaseBlockCache::WriteDestroyBlock(const JitBlock& block)
