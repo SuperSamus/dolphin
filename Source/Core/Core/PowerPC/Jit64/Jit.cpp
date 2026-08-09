@@ -253,8 +253,11 @@ bool Jit64::BackPatch(SContext* ctx)
   return true;
 }
 
-void Jit64::Init()
+bool Jit64::Init()
 {
+  if (!CheckValidity())
+    return false;
+
   InitFastmemArena();
 
   RefreshConfig();
@@ -281,7 +284,9 @@ void Jit64::Init()
 
   m_stack_guard = nullptr;
 
-  blocks.Init();
+  if (!blocks.Init())
+    return false;
+
   asm_routines.Init();
 
   // important: do this *after* generating the global asm routines, because we can't use farcode in
@@ -296,6 +301,8 @@ void Jit64::Init()
   EnableOptimization();
 
   ResetFreeMemoryRanges();
+
+  return true;
 }
 
 void Jit64::ClearCache()
@@ -955,7 +962,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   // Assume that GQR values don't change often at runtime. Many paired-heavy games use largely float
   // loads and stores, which are significantly faster when inlined (especially in MMU mode, where
   // this lets them use fastmem).
-  if (!js.pairedQuantizeAddresses.contains(js.blockStart))
+  if (!js.pairedQuantizeAddresses.IsBitSet(js.blockStart / 4))
   {
     // If there are GQRs used but not set, we'll treat those as constant and optimize them
     BitSet8 gqr_static = ComputeStaticGQRs(code_block);
@@ -984,7 +991,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     }
   }
 
-  if (!js.noSpeculativeConstantsAddresses.contains(js.blockStart))
+  if (!js.noSpeculativeConstantsAddresses.IsBitSet(js.blockStart / 4))
   {
     IntializeSpeculativeConstants();
   }
@@ -1012,7 +1019,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     {
       // Gather pipe writes using a non-immediate address are discovered by profiling.
       const u32 prev_address = m_code_buffer[i - 1].address;
-      bool gatherPipeIntCheck = js.fifoWriteAddresses.contains(prev_address);
+      bool gatherPipeIntCheck = js.fifoWriteAddresses.IsBitSet(prev_address / 4);
 
       // Gather pipe writes using an immediate address are explicitly tracked.
       if (jo.optimizeGatherPipe &&

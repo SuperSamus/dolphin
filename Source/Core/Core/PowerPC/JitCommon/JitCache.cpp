@@ -13,6 +13,7 @@
 #include <span>
 #include <utility>
 
+#include "Common/Align.h"
 #include "Common/CommonTypes.h"
 #include "Common/JitRegister.h"
 #include "Core/Config/MainSettings.h"
@@ -52,8 +53,14 @@ JitBaseBlockCache::JitBaseBlockCache(JitBase& jit) : m_jit{jit}
 
 JitBaseBlockCache::~JitBaseBlockCache() = default;
 
-void JitBaseBlockCache::Init()
+bool JitBaseBlockCache::Init()
 {
+  if (!valid_block.IsValid())
+  {
+    ERROR_LOG_FMT(DYNA_REC, "Failed to create valid_block");
+    return false;
+  }
+
   Common::JitRegister::Init(Config::Get(Config::MAIN_PERF_MAP_DIR));
 
   m_entry_points_ptr = nullptr;
@@ -63,6 +70,8 @@ void JitBaseBlockCache::Init()
 #endif
 
   Clear();
+
+  return true;
 }
 
 void JitBaseBlockCache::Shutdown()
@@ -79,9 +88,9 @@ void JitBaseBlockCache::Clear()
 #if defined(_DEBUG) || defined(DEBUGFAST)
   Core::DisplayMessage("Clearing code cache.", 3000);
 #endif
-  m_jit.js.fifoWriteAddresses.clear();
-  m_jit.js.pairedQuantizeAddresses.clear();
-  m_jit.js.noSpeculativeConstantsAddresses.clear();
+  m_jit.js.fifoWriteAddresses.Clear();
+  m_jit.js.pairedQuantizeAddresses.Clear();
+  m_jit.js.noSpeculativeConstantsAddresses.Clear();
   for (auto& e : block_map)
   {
     DestroyBlock(e.second);
@@ -90,16 +99,16 @@ void JitBaseBlockCache::Clear()
   links_to.clear();
   block_range_map.clear();
 
-  valid_block.ClearAll();
+  valid_block.Clear();
 
   if (m_entry_points_ptr)
     m_entry_points_arena.Clear();
 }
 
-void JitBaseBlockCache::Reset()
+bool JitBaseBlockCache::Reset()
 {
   Shutdown();
-  Init();
+  return Init();
 }
 
 u8** JitBaseBlockCache::GetEntryPoints()
@@ -172,8 +181,7 @@ void JitBaseBlockCache::FinalizeBlock(JitBlock& block, bool block_link,
 
   for (auto [range_start, range_end] : block.physical_addresses)
   {
-    for (u32 i = range_start & ~31; i < range_end; i += 32)
-      valid_block.Set(i / 32);
+    valid_block.SetBits(range_start / 32, Common::AlignUp(range_end, 32) / 32);
 
     for (u32 i = range_start & BLOCK_RANGE_MAP_MASK; i < range_end; i += BLOCK_RANGE_SIZE)
       block_range_map[i].insert(&block);
@@ -311,10 +319,10 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
   bool destroy_block = true;
   if (length == 32 && (physical_address & 0x1fu) == 0)
   {
-    if (!valid_block.Test(physical_address / 32))
+    if (!valid_block.IsBitSet(physical_address / 32))
       destroy_block = false;
     else
-      valid_block.Clear(physical_address / 32);
+      valid_block.ClearBit(physical_address / 32);
   }
   else if (length > 32)
   {
@@ -323,8 +331,7 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
     // cleared regions.
     const u32 covered_block_start = (physical_address + 0x1f) / 32;
     const u32 covered_block_end = (physical_address + length) / 32;
-    for (u32 i = covered_block_start; i < covered_block_end; ++i)
-      valid_block.Clear(i);
+    valid_block.ClearBits(covered_block_start, covered_block_end);
   }
 
   if (destroy_block)
@@ -338,12 +345,11 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
     // being in the right place between instructions).
     if (!forced)
     {
-      for (u32 i = address; i < address + length; i += 4)
-      {
-        m_jit.js.fifoWriteAddresses.erase(i);
-        m_jit.js.pairedQuantizeAddresses.erase(i);
-        m_jit.js.noSpeculativeConstantsAddresses.erase(i);
-      }
+      const size_t start_bit = address / 4;
+      const size_t end_bit = (address + length) / 4;
+      m_jit.js.fifoWriteAddresses.ClearBits(start_bit, end_bit);
+      m_jit.js.pairedQuantizeAddresses.ClearBits(start_bit, end_bit);
+      m_jit.js.noSpeculativeConstantsAddresses.ClearBits(start_bit, end_bit);
     }
   }
 }
@@ -422,9 +428,9 @@ void JitBaseBlockCache::EraseSingleBlock(const JitBlock& block)
   block_map.erase(block_map_iter);  // The original JitBlock reference is now dangling.
 }
 
-u32* JitBaseBlockCache::GetBlockBitSet() const
+const u32* JitBaseBlockCache::GetBlockBitSet() const
 {
-  return valid_block.m_valid_block.get();
+  return valid_block.GetRawMemory();
 }
 
 void JitBaseBlockCache::WriteDestroyBlock(const JitBlock& block)
