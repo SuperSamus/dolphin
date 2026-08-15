@@ -9,7 +9,6 @@
 #include <functional>
 #include <map>
 #include <ranges>
-#include <set>
 #include <span>
 #include <utility>
 
@@ -91,6 +90,8 @@ void JitBaseBlockCache::Clear()
   m_jit.js.fifoWriteAddresses.Clear();
   m_jit.js.pairedQuantizeAddresses.Clear();
   m_jit.js.noSpeculativeConstantsAddresses.Clear();
+
+  // TODO: Remove?
   for (auto& e : block_map)
   {
     DestroyBlock(e.second);
@@ -103,6 +104,8 @@ void JitBaseBlockCache::Clear()
 
   if (m_entry_points_ptr)
     m_entry_points_arena.Clear();
+  else
+    m_fast_block_map_fallback.fill(nullptr);
 }
 
 bool JitBaseBlockCache::Reset()

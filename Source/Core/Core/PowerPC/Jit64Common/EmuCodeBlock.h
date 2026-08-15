@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <unordered_map>
-
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Common/x64Emitter.h"
@@ -19,10 +17,13 @@ class Mapping;
 }
 
 class Jit64;
+class JitBlockCache;
 
 // Like XCodeBlock but has some utilities for memory access.
 class EmuCodeBlock : public Gen::X64CodeBlock
 {
+  friend class JitBlockCache;
+
 public:
   explicit EmuCodeBlock(Jit64& jit) : m_jit{jit} {}
   void MemoryExceptionCheck();
@@ -140,6 +141,6 @@ protected:
   u8* m_near_code_end = nullptr;
   bool m_near_code_write_failed = false;
 
-  std::unordered_map<u8*, TrampolineInfo> m_back_patch_info;
-  std::unordered_map<u8*, u8*> m_exception_handler_at_loc;
+  std::map<u8*, TrampolineInfo> m_back_patch_info;
+  std::map<u8*, u8*> m_exception_handler_at_loc;
 };

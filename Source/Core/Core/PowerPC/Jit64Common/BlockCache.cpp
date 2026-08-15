@@ -7,7 +7,8 @@
 #include "Common/x64Emitter.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 
-JitBlockCache::JitBlockCache(JitBase& jit) : JitBaseBlockCache{jit}
+JitBlockCache::JitBlockCache(JitBase& jit, EmuCodeBlock& emu_code_block)
+    : JitBaseBlockCache{jit}, m_emu_code_block(emu_code_block)
 {
 }
 
@@ -46,8 +47,16 @@ void JitBlockCache::WriteLinkBlock(const JitBlock::LinkData& source, const JitBl
 void JitBlockCache::WriteDestroyBlock(const JitBlock& block)
 {
   // Only clear the entry point as we might still be within this block.
+  // In this case, the instruction needs to return to the dispatcher by itself ASAP.
   Gen::XEmitter emit(block.normalEntry, block.normalEntry + 1);
   emit.INT3();
+
+  m_emu_code_block.m_back_patch_info.erase(
+      m_emu_code_block.m_back_patch_info.lower_bound(block.near_begin),
+      m_emu_code_block.m_back_patch_info.lower_bound(block.near_end));
+  m_emu_code_block.m_exception_handler_at_loc.erase(
+      m_emu_code_block.m_exception_handler_at_loc.lower_bound(block.near_begin),
+      m_emu_code_block.m_exception_handler_at_loc.lower_bound(block.near_end));
 }
 
 bool JitBlockCache::Init()

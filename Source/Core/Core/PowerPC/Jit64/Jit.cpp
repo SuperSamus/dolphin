@@ -577,7 +577,7 @@ void Jit64::MSRUpdated(const OpArg& msr, X64Reg scratch_reg)
   }
 }
 
-void Jit64::WriteExit(u32 destination, bool bl, u32 after)
+void Jit64::WriteExit(u32 destination, bool bl, u32 after, bool link)
 {
   if (!m_enable_blr_optimization)
     bl = false;
@@ -592,10 +592,10 @@ void Jit64::WriteExit(u32 destination, bool bl, u32 after)
 
   SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
 
-  JustWriteExit(destination, bl, after);
+  JustWriteExit(destination, bl, after, link);
 }
 
-void Jit64::JustWriteExit(u32 destination, bool bl, u32 after)
+void Jit64::JustWriteExit(u32 destination, bool bl, u32 after, bool link)
 {
   // If nobody has taken care of this yet (this can be removed when all branches are done)
   JitBlock* b = js.curBlock;
@@ -634,7 +634,8 @@ void Jit64::JustWriteExit(u32 destination, bool bl, u32 after)
     JMP(asm_routines.dispatcher_no_timing_check, true);
   }
 
-  b->linkData.push_back(linkData);
+  if (link)
+    b->linkData.push_back(linkData);
 }
 
 void Jit64::WriteExitDestInRSCRATCH(bool bl, u32 after)

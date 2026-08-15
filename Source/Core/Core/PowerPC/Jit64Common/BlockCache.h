@@ -5,6 +5,7 @@
 
 #include <vector>
 
+#include "Core/PowerPC/Jit64Common/EmuCodeBlock.h"
 #include "Core/PowerPC/JitCommon/JitCache.h"
 
 class JitBase;
@@ -12,7 +13,7 @@ class JitBase;
 class JitBlockCache : public JitBaseBlockCache
 {
 public:
-  explicit JitBlockCache(JitBase& jit);
+  explicit JitBlockCache(JitBase& jit, EmuCodeBlock& emu_code_block);
 
   [[nodiscard]] bool Init() override;
 
@@ -29,4 +30,6 @@ private:
 
   std::vector<std::pair<u8*, u8*>> m_ranges_to_free_on_next_codegen_near;
   std::vector<std::pair<u8*, u8*>> m_ranges_to_free_on_next_codegen_far;
+
+  EmuCodeBlock& m_emu_code_block;
 };

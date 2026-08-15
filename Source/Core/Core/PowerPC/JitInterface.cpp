@@ -4,8 +4,8 @@
 #include "Core/PowerPC/JitInterface.h"
 
 #include <string>
-#include <unordered_set>
 
+#include "Common/Align.h"
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
@@ -297,14 +297,20 @@ void JitInterface::InvalidateICacheLines(u32 address, u32 count)
     InvalidateICache(address & ~0x1f, 32 * count, false);
 }
 
-void JitInterface::InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address)
+bool JitInterface::InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address)
 {
+  const bool is_self_deleting =
+      jit_interface.m_jit->js.curBlock->OverlapsPhysicalRange(Common::AlignDown(address, 32), 32);
   jit_interface.InvalidateICacheLine(address);
+  return is_self_deleting;
 }
 
-void JitInterface::InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count)
+bool JitInterface::InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count)
 {
+  const bool is_self_deleting = jit_interface.m_jit->js.curBlock->OverlapsPhysicalRange(
+      Common::AlignDown(address, 32), 32 * count);
   jit_interface.InvalidateICacheLines(address, count);
+  return is_self_deleting;
 }
 
 void JitInterface::CompileExceptionCheck(ExceptionType type)
@@ -346,7 +352,12 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
 
     // Invalidate the JIT block so that it gets recompiled with the external exception check
     // included.
-    m_jit->GetBlockCache()->InvalidateICache(ppc_state.pc, 4, true);
+    if (type != ExceptionType::FIFOWrite)
+    {
+      // TODO: Not a problem for NBA since that block is short-lived anyway, but needs a better
+      // solution for other games.
+      m_jit->GetBlockCache()->InvalidateICache(ppc_state.pc, 4, true);
+    }
   }
 }
 

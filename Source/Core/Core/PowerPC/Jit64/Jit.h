@@ -100,8 +100,8 @@ public:
   void EmitUpdateMembase();
   void MSRUpdated(const Gen::OpArg& msr, Gen::X64Reg scratch_reg);
   void FakeBLCall(u32 after);
-  void WriteExit(u32 destination, bool bl = false, u32 after = 0);
-  void JustWriteExit(u32 destination, bool bl, u32 after);
+  void WriteExit(u32 destination, bool bl = false, u32 after = 0, bool link = true);
+  void JustWriteExit(u32 destination, bool bl, u32 after, bool link = true);
   void WriteExitDestInRSCRATCH(bool bl = false, u32 after = 0);
   void WriteBLRExit();
   void WriteExceptionExit();
@@ -284,7 +284,7 @@ private:
 
   static void ImHere(Jit64& jit);
 
-  JitBlockCache blocks{*this};
+  JitBlockCache blocks{*this, *this};
   TrampolineCache trampolines{*this};
 
   GPRRegCache gpr{*this, *this};
