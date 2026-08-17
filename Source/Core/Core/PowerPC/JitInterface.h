@@ -83,10 +83,15 @@ public:
   std::size_t DisassembleNearCode(const JitBlock& block, std::ostream& stream) const;
   std::size_t DisassembleFarCode(const JitBlock& block, std::ostream& stream) const;
 
-  // If "forced" is true, a recompile is being requested on code that hasn't been modified.
-  void InvalidateICache(u32 address, u32 size, bool forced);
+  // A range of addresses may have been modified.
+  // The passed address does not automatically align to the cache line.
+  void InvalidateICache(u32 address, u32 size);
+  // A cache line may have been modified.
   void InvalidateICacheLine(u32 address);
+  // Multiple cache lines may have been modified.
   void InvalidateICacheLines(u32 address, u32 count);
+  // No instruction was modified, but the blocks containing this instruction need to be erased.
+  void EraseBlocksWithInstruction(u32 address);
   static void InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address);
   static void InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count);
 

@@ -245,7 +245,7 @@ void JitInterface::ClearSafe()
 void JitInterface::EraseSingleBlock(const JitBlock& block)
 {
   if (m_jit)
-    m_jit->EraseSingleBlock(block);
+    m_jit->GetBlockCache()->EraseSingleBlock(block);
 }
 
 std::vector<JitBase::MemoryStats> JitInterface::GetMemoryStats() const
@@ -269,10 +269,10 @@ std::size_t JitInterface::DisassembleFarCode(const JitBlock& block, std::ostream
   return 0;
 }
 
-void JitInterface::InvalidateICache(u32 address, u32 size, bool forced)
+void JitInterface::InvalidateICache(u32 address, u32 size)
 {
   if (m_jit)
-    m_jit->GetBlockCache()->InvalidateICache(address, size, forced);
+    m_jit->GetBlockCache()->InvalidateICache(address, size);
 }
 
 void JitInterface::InvalidateICacheLine(u32 address)
@@ -291,10 +291,15 @@ void JitInterface::InvalidateICacheLines(u32 address, u32 count)
   // with an extra optimization for the case of a single cache line invalidation
   if (count == 1)
     InvalidateICacheLine(address);
-  else if (count == 0 || count >= static_cast<u32>(0x1'0000'0000 / 32))
-    InvalidateICache(address & ~0x1f, 0xffffffff, false);
-  else
-    InvalidateICache(address & ~0x1f, 32 * count, false);
+  const u32 size =
+      count == 0 || count >= static_cast<u32>(0x1'0000'0000 / 32) ? 0xffffffff : 32 * count;
+  InvalidateICache(address & ~0x1f, size);
+}
+
+void JitInterface::EraseBlocksWithInstruction(u32 address)
+{
+  if (m_jit)
+    m_jit->GetBlockCache()->EraseBlocksWithInstruction(address);
 }
 
 void JitInterface::InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address)
@@ -346,7 +351,7 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
 
     // Invalidate the JIT block so that it gets recompiled with the external exception check
     // included.
-    m_jit->GetBlockCache()->InvalidateICache(ppc_state.pc, 4, true);
+    EraseBlocksWithInstruction(ppc_state.pc);
   }
 }
 

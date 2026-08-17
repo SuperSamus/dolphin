@@ -291,10 +291,10 @@ void JitBaseBlockCache::InvalidateICacheLine(u32 address)
   const u32 cache_line_address = address & ~0x1f;
   const auto translated = m_jit.m_mmu.JitCache_TranslateAddress(cache_line_address);
   if (translated.valid)
-    InvalidateICacheInternal(translated.address, cache_line_address, 32, false);
+    InvalidateICacheInternal(translated.address, cache_line_address, 32);
 }
 
-void JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length, bool forced)
+void JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length)
 {
   u32 address = initial_address;
   u32 length = initial_length;
@@ -310,34 +310,31 @@ void JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length
     if ((first_address & mask) == (last_address & mask))
     {
       if (translated.valid)
-        InvalidateICacheInternal(translated.address, address, length, forced);
+        InvalidateICacheInternal(translated.address, address, length);
       return;
     }
 
     const u32 end_of_page = (first_address + (1u << shift)) & mask;
     const u32 length_this_page = end_of_page - first_address;
     if (translated.valid)
-      InvalidateICacheInternal(translated.address, address, length_this_page, forced);
+      InvalidateICacheInternal(translated.address, address, length_this_page);
     address = address + length_this_page;
     length = length - length_this_page;
   }
 }
 
-void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 address, u32 length,
-                                                 bool forced)
+void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 address, u32 length)
 {
   // Optimization for the case of invalidating a single cache line, which is used by the dcb*
   // instructions. If the valid_block bit for that cacheline is not set, we can safely skip
   // the remaining invalidation logic.
-  bool destroy_block = true;
   if (length == 32 && (physical_address & 0x1fu) == 0)
   {
     if (!valid_block.Test(physical_address / 32))
-      destroy_block = false;
-    else
-      valid_block.Clear(physical_address / 32);
+      return;
+    valid_block.Clear(physical_address / 32);
   }
-  else if (length > 32)
+  else
   {
     // Even if we can't check the set for optimization, we still want to remove all fully covered
     // cache lines from the valid_block set so that later calls don't try to invalidate already
@@ -348,25 +345,25 @@ void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 addre
       valid_block.Clear(i);
   }
 
-  if (destroy_block)
-  {
-    // destroy JIT blocks
-    ErasePhysicalRange(physical_address, length);
+  // Destroy JIT blocks
+  ErasePhysicalRange(physical_address, length);
 
-    // If the code was actually modified, we need to clear the relevant entries from the
-    // FIFO write address cache, so we don't end up with FIFO checks in places they shouldn't
-    // be (this can clobber flags, and thus break any optimization that relies on flags
-    // being in the right place between instructions).
-    if (!forced)
-    {
-      for (u32 i = address; i < address + length; i += 4)
-      {
-        m_jit.js.fifoWriteAddresses.erase(i);
-        m_jit.js.pairedQuantizeAddresses.erase(i);
-        m_jit.js.noSpeculativeConstantsAddresses.erase(i);
-      }
-    }
+  // We assume that the code was actually modified, so these entires are now obsolete.
+  for (u32 i = address; i < address + length; i += 4)
+  {
+    m_jit.js.fifoWriteAddresses.erase(i);
+    m_jit.js.pairedQuantizeAddresses.erase(i);
+    m_jit.js.noSpeculativeConstantsAddresses.erase(i);
   }
+}
+
+void JitBaseBlockCache::EraseBlocksWithInstruction(u32 address)
+{
+  const u32 instruction_address = address & ~0x3u;
+  const auto translated = m_jit.m_mmu.JitCache_TranslateAddress(instruction_address);
+  // Intentionally skip the other things done by `InvalidateICacheInternal`.
+  if (translated.valid)
+    ErasePhysicalRange(translated.address, 4);
 }
 
 void JitBaseBlockCache::ErasePhysicalRange(u32 address, u32 length)

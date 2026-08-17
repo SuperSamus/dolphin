@@ -115,7 +115,7 @@ void BreakPoints::Add(TBreakPoint bp)
   if (IsAddressBreakPoint(bp.address))
     return;
 
-  m_system.GetJitInterface().InvalidateICache(bp.address, 4, true);
+  m_system.GetJitInterface().EraseBlocksWithInstruction(bp.address);
 
   m_breakpoints.emplace_back(std::move(bp));
 }
@@ -149,7 +149,7 @@ void BreakPoints::Add(u32 address, bool break_on_hit, bool log_on_hit,
     m_breakpoints.emplace_back(std::move(bp));
   }
 
-  m_system.GetJitInterface().InvalidateICache(address, 4, true);
+  m_system.GetJitInterface().EraseBlocksWithInstruction(address);
 }
 
 void BreakPoints::SetTemporary(u32 address)
@@ -163,7 +163,7 @@ void BreakPoints::SetTemporary(u32 address)
 
   m_temp_breakpoint.emplace(std::move(bp));
 
-  m_system.GetJitInterface().InvalidateICache(address, 4, true);
+  m_system.GetJitInterface().EraseBlocksWithInstruction(address);
 }
 
 bool BreakPoints::ToggleBreakPoint(u32 address)
@@ -200,7 +200,7 @@ bool BreakPoints::Remove(u32 address)
     return false;
 
   m_breakpoints.erase(iter);
-  m_system.GetJitInterface().InvalidateICache(address, 4, true);
+  m_system.GetJitInterface().EraseBlocksWithInstruction(address);
 
   return true;
 }
@@ -209,7 +209,7 @@ void BreakPoints::Clear()
 {
   for (const TBreakPoint& bp : m_breakpoints)
   {
-    m_system.GetJitInterface().InvalidateICache(bp.address, 4, true);
+    m_system.GetJitInterface().EraseBlocksWithInstruction(bp.address);
   }
 
   m_breakpoints.clear();
@@ -220,7 +220,7 @@ void BreakPoints::ClearTemporary()
 {
   if (m_temp_breakpoint)
   {
-    m_system.GetJitInterface().InvalidateICache(m_temp_breakpoint->address, 4, true);
+    m_system.GetJitInterface().EraseBlocksWithInstruction(m_temp_breakpoint->address);
     m_temp_breakpoint.reset();
   }
 }

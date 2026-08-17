@@ -258,7 +258,7 @@ bool JitBase::HandleStackFault()
   // Jit. In the case of Windows, we will also need to call _resetstkoflw()
   // to reset the guard page.
   // Yeah, it's kind of gross.
-  GetBlockCache()->InvalidateICache(0, 0xffffffff, true);
+  GetBlockCache()->Clear();
   m_system.GetCoreTiming().ForceExceptionCheck(0);
   m_cleanup_after_stackfault = true;
 
