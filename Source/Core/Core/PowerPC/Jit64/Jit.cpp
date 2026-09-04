@@ -179,14 +179,6 @@ bool Jit64::BackPatch(SContext* ctx)
 
   TrampolineInfo& info = it->second;
 
-  u8* exceptionHandler = nullptr;
-  if (jo.memcheck)
-  {
-    auto it2 = m_exception_handler_at_loc.find(codePtr);
-    if (it2 != m_exception_handler_at_loc.end())
-      exceptionHandler = it2->second;
-  }
-
   // In the trampoline code, we jump back into the block at the beginning
   // of the next instruction. The next instruction comes immediately
   // after the backpatched operation, or BACKPATCH_SIZE bytes after the start
@@ -195,7 +187,7 @@ bool Jit64::BackPatch(SContext* ctx)
   // to insert the backpatch jump.)
 
   js.generatingTrampoline = true;
-  js.trampolineExceptionHandler = exceptionHandler;
+  js.trampolineExceptionHandler = info.exception_handler_at_loc;
   js.compilerPC = info.pc;
 
   // Generate the trampoline.
@@ -1203,12 +1195,11 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SwitchToFarCode();
         if (!js.fastmemLoadStore)
         {
-          m_exception_handler_at_loc[js.fastmemLoadStore] = nullptr;
           SetJumpTarget(js.fixupExceptionHandler ? js.exceptionHandler : memException);
         }
         else
         {
-          m_exception_handler_at_loc[js.fastmemLoadStore] = GetWritableCodePtr();
+          m_back_patch_info.at(js.fastmemLoadStore).exception_handler_at_loc = GetWritableCodePtr();
         }
 
         RCForkGuard gpr_guard = gpr.Fork();
