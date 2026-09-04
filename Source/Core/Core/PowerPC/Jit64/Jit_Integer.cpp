@@ -7,11 +7,12 @@
 #include <bit>
 #include <limits>
 
+#include <sfl/static_vector.hpp>
+
 #include "Common/Assert.h"
 #include "Common/CPUDetect.h"
 #include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
-#include "Common/SmallVector.h"
 #include "Common/x64Emitter.h"
 
 #include "Core/PowerPC/ConditionRegister.h"
@@ -2531,7 +2532,7 @@ void Jit64::twX(UGeckoInstruction inst)
   }
 
   constexpr std::array<CCFlags, 5> conditions{{CC_A, CC_B, CC_E, CC_G, CC_L}};
-  Common::SmallVector<FixupBranch, conditions.size()> fixups;
+  sfl::static_vector<FixupBranch, conditions.size()> fixups;
 
   for (size_t i = 0; i < conditions.size(); i++)
   {
