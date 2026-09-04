@@ -701,6 +701,7 @@ PRIVATE
   fmt::fmt
   LZO::LZO
   LZ4::LZ4
+  sfl
   ZLIB::ZLIB
 )
 
