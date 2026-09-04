@@ -691,6 +691,7 @@ PUBLIC
   inputcommon
   MbedTLS::mbedtls
   pugixml
+  sfl
   sfml-network
   videonull
   videoogl
@@ -701,7 +702,6 @@ PRIVATE
   fmt::fmt
   LZO::LZO
   LZ4::LZ4
-  sfl
   ZLIB::ZLIB
 )
 
