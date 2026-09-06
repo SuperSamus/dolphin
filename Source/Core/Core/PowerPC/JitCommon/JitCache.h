@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "sfl/compact_vector.hpp"
+
 #include "Common/CommonTypes.h"
 #include "Common/RangeSet.h"
 #include "Core/HW/Memmap.h"
@@ -97,7 +99,7 @@ struct JitBlock : public JitBlockData
     bool linkStatus;  // is it already linked?
     bool call;
   };
-  std::vector<LinkData> linkData;
+  sfl::compact_vector<LinkData> linkData;
 
   // This set stores all physical addresses of all occupied instructions.
   Common::RangeSet<u32> physical_addresses;

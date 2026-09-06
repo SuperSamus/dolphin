@@ -12,6 +12,8 @@
 #include <span>
 #include <utility>
 
+#include "sfl/compact_vector.hpp"
+
 #include "Common/Align.h"
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
@@ -159,6 +161,7 @@ JitBlock JitBaseBlockCache::InitBlock(u32 em_address)
   b.effectiveAddress = em_address;
   b.physicalAddress = physical_address;
   b.feature_flags = m_jit.m_ppc_state.feature_flags;
+  m_jit.js.link_data_temp.clear();
   return b;
 }
 
@@ -169,6 +172,10 @@ void JitBaseBlockCache::FinalizeBlock(JitBlock&& b, bool block_link,
   JitBlock& block =
       block_map.emplace(MapLookupIndex(b.physicalAddress, b.feature_flags), std::move(b))
           .first->second;
+
+  // Copy is intentional to minimize allocations due to exceeded capacity.
+  block.linkData =
+      sfl::compact_vector<JitBlock::LinkData>(sfl::from_range_t(), m_jit.js.link_data_temp);
 
   size_t index = FastLookupIndexForAddress(block.effectiveAddress, block.feature_flags);
   if (m_entry_points_ptr)

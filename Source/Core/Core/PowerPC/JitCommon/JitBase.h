@@ -144,6 +144,8 @@ protected:
 #ifdef _M_ARM_64
     std::vector<FastmemArea> fault_to_handler_temp;
 #endif
+    // Copy as a batch when finalizing the block, minimizing allocations due to exceeded capacity.
+    std::vector<JitBlock::LinkData> link_data_temp;
   };
 
   PPCAnalyst::CodeBlock code_block;
