@@ -129,22 +129,22 @@ void JitBaseBlockCache::WipeBlockProfilingData(const Core::CPUThreadGuard&)
   Host_JitProfileDataWiped();
 }
 
-JitBlock* JitBaseBlockCache::AllocateBlock(u32 em_address)
+JitBlock JitBaseBlockCache::InitBlock(u32 em_address)
 {
   const u32 physical_address = m_jit.m_mmu.JitCache_TranslateAddress(em_address).address;
-  JitBlock& b = block_map.emplace(physical_address, m_jit.IsProfilingEnabled())->second;
+  JitBlock b(m_jit.IsProfilingEnabled());
   b.effectiveAddress = em_address;
   b.physicalAddress = physical_address;
   b.feature_flags = m_jit.m_ppc_state.feature_flags;
-  b.linkData.clear();
-  b.fast_block_map_index = 0;
-  return &b;
+  return b;
 }
 
-void JitBaseBlockCache::FinalizeBlock(JitBlock& block, bool block_link,
+void JitBaseBlockCache::FinalizeBlock(JitBlock&& b, bool block_link,
                                       const PPCAnalyst::CodeBlock& code_block,
                                       const PPCAnalyst::CodeBuffer& code_buffer)
 {
+  JitBlock& block = block_map.emplace(b.physicalAddress, std::move(b))->second;
+
   size_t index = FastLookupIndexForAddress(block.effectiveAddress, block.feature_flags);
   if (m_entry_points_ptr)
   {
@@ -162,12 +162,9 @@ void JitBaseBlockCache::FinalizeBlock(JitBlock& block, bool block_link,
   block.originalSize = code_block.m_num_instructions;
   if (m_jit.IsDebuggingEnabled())
   {
-    // TODO C++23: Can do this all in one statement with `std::vector::assign_range`.
-    const std::ranges::transform_view original_buffer_transform_view{
+    block.original_buffer.assign_range(std::ranges::transform_view{
         std::span{code_buffer.data(), block.originalSize},
-        [](const PPCAnalyst::CodeOp& op) { return std::make_pair(op.address, op.inst); }};
-    block.original_buffer.assign(original_buffer_transform_view.begin(),
-                                 original_buffer_transform_view.end());
+        [](const PPCAnalyst::CodeOp& op) { return std::make_pair(op.address, op.inst); }});
   }
 
   for (auto [range_start, range_end] : block.physical_addresses)
