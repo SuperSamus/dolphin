@@ -572,7 +572,7 @@ void JitArm64::WriteExit(u32 destination, bool LK, u32 exit_address_after_return
   linkData.linkStatus = false;
   linkData.call = LK;
   linkData.exitFarcode = primary_farcode_addr;
-  b->linkData.push_back(linkData);
+  js.link_data_temp.push_back(linkData);
 
   blocks.WriteLinkBlock(*this, linkData);
 
@@ -586,7 +586,7 @@ void JitArm64::WriteExit(u32 destination, bool LK, u32 exit_address_after_return
     linkData.linkStatus = false;
     linkData.call = false;
     linkData.exitFarcode = return_farcode_addr;
-    b->linkData.push_back(linkData);
+    js.link_data_temp.push_back(linkData);
 
     blocks.WriteLinkBlock(*this, linkData);
   }
@@ -677,7 +677,7 @@ void JitArm64::WriteExit(Arm64Gen::ARM64Reg dest, bool LK, u32 exit_address_afte
     {
       linkData.exitFarcode = GetCodePtr() + JitArm64BlockCache::BLOCK_LINK_SIZE;
     }
-    b->linkData.push_back(linkData);
+    js.link_data_temp.push_back(linkData);
 
     blocks.WriteLinkBlock(*this, linkData);
 
@@ -763,7 +763,7 @@ void JitArm64::FakeLKExit(u32 exit_address_after_return, ARM64Reg exit_address_a
   {
     linkData.exitFarcode = GetCodePtr() + JitArm64BlockCache::BLOCK_LINK_SIZE;
   }
-  b->linkData.push_back(linkData);
+  js.link_data_temp.push_back(linkData);
 
   blocks.WriteLinkBlock(*this, linkData);
 
