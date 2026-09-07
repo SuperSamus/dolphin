@@ -240,8 +240,9 @@ private:
   // This is used for invalidation of memory regions. The range is grouped
   // in macro blocks of each 0x100 bytes.
   static constexpr u32 BLOCK_RANGE_SIZE = 0x100;
-  static constexpr u32 BLOCK_RANGE_MAP_MASK = ~(BLOCK_RANGE_SIZE - 1);
-  std::map<u32, std::vector<JitBlock*>> block_range_map;
+  // While an ordered map may grant more performance by iterating through contigous macroblocks,
+  // actually taking advantage of it would make the code much more messy.
+  std::unordered_map<u32, std::vector<JitBlock*>> block_range_map;
 
   // This bitsets shows which cachelines overlap with any blocks.
   // It is used to provide a fast way to query if no icache invalidation is needed.
