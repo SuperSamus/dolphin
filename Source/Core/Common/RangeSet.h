@@ -5,7 +5,7 @@
 
 #include <cassert>
 #include <cstddef>
-#include <map>
+#include <flat_map>
 #include <utility>
 
 namespace Common
@@ -14,17 +14,25 @@ template <typename T>
 class RangeSet
 {
 private:
-  using MapT = std::map<T, T>;
+  // TODO: flat_map prefers batch operations when possible, not one-by-one insertions and erasure.
+  // Currently it doesn't matter due to how it's used, so flat_map is chosen due to its faster
+  // iteration speed, but if the use cases changes then it would need adjustments.
+  using MapT = std::flat_map<T, T>;
 
 public:
   struct const_iterator
   {
   public:
+    using value_type = MapT::value_type;
+    using difference_type = MapT::difference_type;
+    using reference = MapT::reference;
+    using const_reference = MapT::const_reference;
+
     const T& from() const { return It->first; }
 
     const T& to() const { return It->second; }
 
-    std::pair<T, T> operator*() { return {from(), to()}; }
+    value_type operator*() const { return {from(), to()}; }
 
     const_iterator& operator++()
     {
@@ -55,6 +63,8 @@ public:
     bool operator==(const const_iterator& rhs) const { return this->It == rhs.It; }
 
     bool operator!=(const const_iterator& rhs) const { return !operator==(rhs); }
+
+    const_iterator() : It() {}
 
   private:
     typename MapT::const_iterator It;
