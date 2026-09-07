@@ -5,8 +5,9 @@
 
 #include <cassert>
 #include <cstddef>
-#include <map>
 #include <utility>
+
+#include <sfl/flat_map.hpp>
 
 namespace Common
 {
@@ -14,17 +15,24 @@ template <typename T>
 class RangeSet
 {
 private:
-  using MapT = std::map<T, T>;
+  // std::flat_map uses separate vectors for keys and values, while sfl uses one for both (in
+  // pairs). With the small sizes this is used for, the former is overkill.
+  using MapT = sfl::flat_map<T, T>;
 
 public:
   struct const_iterator
   {
   public:
+    using value_type = MapT::value_type;
+    using difference_type = MapT::difference_type;
+    using pointer = MapT::pointer;
+    using reference = MapT::reference;
+
     const T& from() const { return It->first; }
 
     const T& to() const { return It->second; }
 
-    std::pair<T, T> operator*() { return {from(), to()}; }
+    value_type operator*() const { return {from(), to()}; }
 
     const_iterator& operator++()
     {
@@ -55,6 +63,8 @@ public:
     bool operator==(const const_iterator& rhs) const { return this->It == rhs.It; }
 
     bool operator!=(const const_iterator& rhs) const { return !operator==(rhs); }
+
+    const_iterator() : It() {}
 
   private:
     typename MapT::const_iterator It;

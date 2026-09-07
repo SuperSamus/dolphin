@@ -160,6 +160,7 @@ void JitBaseBlockCache::FinalizeBlock(JitBlock&& b, bool block_link,
   }
   block.fast_block_map_index = index;
 
+  // The copy is intentional, to minimize allocations due to exceeded vector capacity.
   block.physical_addresses = code_block.m_physical_addresses;
 
   block.originalSize = code_block.m_num_instructions;
