@@ -98,9 +98,7 @@ protected:
   };
   struct JitState
   {
-    u32 compilerPC;
-    u32 blockStart;
-    int instructionsLeft;
+    u32 instructionsLeft;
     u32 downcountAmount;
     u32 numLoadStoreInst;
     u32 numFloatingPointInst;
@@ -115,8 +113,7 @@ protected:
     BitSet8 constantGqrValid;
     std::array<u32, 8> constantGqr;
     bool firstFPInstructionFound;
-    bool isLastInstruction;
-    int skipInstructions;
+    u32 skipInstructions;
     CarryFlag carryFlag;
 
     bool generatingTrampoline = false;
@@ -146,6 +143,8 @@ protected:
 #endif
     // Copy as a batch when finalizing the block, minimizing allocations due to exceeded capacity.
     std::vector<JitBlock::LinkData> link_data_temp;
+
+    bool isLastInstruction() const { return instructionsLeft == 0; }
   };
 
   PPCAnalyst::CodeBlock code_block;
