@@ -216,11 +216,38 @@ static u32 GetSPRIndex(UGeckoInstruction inst)
   return (inst.SPRU << 5) | (inst.SPRL & 0x1F);
 }
 
-static bool InstructionCanEndBlock(const CodeOp& op)
+InstructionContinue CanEndBlock(const CodeOp& op)
 {
-  return (op.opinfo->flags & FL_ENDBLOCK) &&
-         (!IsMtspr(op.inst) || GetSPRIndex(op.inst) == SPR_MMCR0 ||
-          GetSPRIndex(op.inst) == SPR_MMCR1);
+  if (op.opinfo->flags & FL_ENDBLOCK)
+  {
+    const UGeckoInstruction& inst = op.inst;
+    if (IsMtspr(inst))
+    {
+      if (GetSPRIndex(inst) == SPR_MMCR0 || GetSPRIndex(inst) == SPR_MMCR1)
+      {
+        return InstructionContinue::Never;
+      }
+      return InstructionContinue::Always;
+    }
+    // Conditional branches
+    if (
+        // bcx with conditional branch
+        (inst.OPCD == 16 &&
+         ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0 || (inst.BO & BO_DONT_CHECK_CONDITION) == 0)) ||
+        // bclrx with conditional branch
+        (inst.OPCD == 19 && inst.SUBOP10 == 16 &&
+         ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0 || (inst.BO & BO_DONT_CHECK_CONDITION) == 0)) ||
+        // Rare bcctrx with conditional branch
+        // Seen in NES games
+        (inst.OPCD == 19 && inst.SUBOP10 == 528 && (inst.BO_2 & BO_DONT_CHECK_CONDITION) == 0) ||
+        // tw/twi tests and raises an exception
+        (inst.OPCD == 3 || (inst.OPCD == 31 && inst.SUBOP10 == 4)))
+    {
+      return InstructionContinue::Maybe;
+    }
+    return InstructionContinue::Never;
+  }
+  return InstructionContinue::Always;
 }
 
 bool PPCAnalyzer::CanSwapAdjacentOps(const CodeOp& a, const CodeOp& b) const
@@ -243,7 +270,8 @@ bool PPCAnalyzer::CanSwapAdjacentOps(const CodeOp& a, const CodeOp& b) const
   // [1] https://bugs.dolphin-emu.org/issues/5864#note-7
   if (a.canCauseException || b.canCauseException)
     return false;
-  if (a.canEndBlock || b.canEndBlock)
+  if (a.instructionContinues != InstructionContinue::Always ||
+      b.instructionContinues != InstructionContinue::Always)
     return false;
   if (a_flags & (FL_TIMER | FL_NO_REORDER | FL_SET_OE))
     return false;
@@ -620,7 +648,7 @@ void PPCAnalyzer::SetInstructionStats(CodeBlock* block, CodeOp* code,
 
   code->wantsFPRF = (opinfo->flags & FL_READ_FPRF) != 0;
   code->outputFPRF = (opinfo->flags & FL_SET_FPRF) != 0;
-  code->canEndBlock = InstructionCanEndBlock(*code);
+  code->instructionContinues = CanEndBlock(*code);
 
   code->canCauseException = first_fpu_instruction ||
                             (opinfo->flags & (FL_LOADSTORE | FL_PROGRAMEXCEPTION)) != 0 ||
@@ -802,8 +830,8 @@ static bool CanCauseGatherPipeInterruptCheck(const CodeOp& op)
          op.opinfo->type == OpType::StorePS;
 }
 
-u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
-                         std::size_t block_size) const
+void PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
+                          std::size_t block_size) const
 {
   // Clear block stats
   *block->m_stats = {};
@@ -816,7 +844,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
   block->m_address = address;
 
   // Reset our block state
-  block->m_broken = false;
   block->m_memory_exception = false;
   block->m_num_instructions = 0;
   block->m_gqr_used = BitSet8(0);
@@ -824,7 +851,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
 
   CodeOp* const code = buffer->data();
 
-  bool found_exit = false;
   bool found_call = false;
   size_t caller = 0;
   u32 numFollows = 0;
@@ -860,8 +886,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     SetInstructionStats(block, &code[i], opinfo);
 
     bool follow = false;
-
-    bool conditional_continue = false;
 
     // TODO: Find the optimal value for BRANCH_FOLLOWING_THRESHOLD.
     //       If it is small, the performance will be down.
@@ -917,34 +941,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
       }
     }
 
-    if (HasOption(OPTION_CONDITIONAL_CONTINUE))
-    {
-      if (inst.OPCD == 16 &&
-          ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0 || (inst.BO & BO_DONT_CHECK_CONDITION) == 0))
-      {
-        // bcx with conditional branch
-        conditional_continue = true;
-      }
-      else if (inst.OPCD == 19 && inst.SUBOP10 == 16 &&
-               ((inst.BO & BO_DONT_DECREMENT_FLAG) == 0 ||
-                (inst.BO & BO_DONT_CHECK_CONDITION) == 0))
-      {
-        // bclrx with conditional branch
-        conditional_continue = true;
-      }
-      else if (inst.OPCD == 3 || (inst.OPCD == 31 && inst.SUBOP10 == 4))
-      {
-        // tw/twi tests and raises an exception
-        conditional_continue = true;
-      }
-      else if (inst.OPCD == 19 && inst.SUBOP10 == 528 && (inst.BO_2 & BO_DONT_CHECK_CONDITION) == 0)
-      {
-        // Rare bcctrx with conditional branch
-        // Seen in NES games
-        conditional_continue = true;
-      }
-    }
-
     if (code[i].branchTo == block->m_address && IsBusyWaitLoop(block, code, i))
       code[i].branchAction = BranchAction::IdleLoop;
 
@@ -960,17 +956,17 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     {
       // Just pick the next instruction
       address += 4;
-      if (!conditional_continue && InstructionCanEndBlock(code[i]))  // right now we stop early
-      {
-        found_exit = true;
+      if (code[i].instructionContinues == InstructionContinue::Never ||
+          (!HasOption(OPTION_CONDITIONAL_CONTINUE) &&
+           code[i].instructionContinues == InstructionContinue::Maybe))
         break;
-      }
-      if (conditional_continue)
-      {
-        // If we skip any conditional branch, we can't guarantee to get the matching CALL/RET pair.
-        // So we stop inlining the RET here and let the BLR optimization handle this case.
-        found_call = false;
-      }
+
+      // If we skip any conditional branch, we can't guarantee to get the matching CALL/RET pair.
+      // So we stop inlining the RET here and let the BLR optimization handle this case.
+      // ...is what'd be said, if emitted branches were able to target the same block, but they
+      // currently can't.
+      // if (code[i].instructionContinues == InstructionContinue::ConditionalBranch)
+      //   found_call = false;
     }
   }
 
@@ -978,12 +974,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
 
   if (block->m_num_instructions > 1)
     ReorderInstructions(block->m_num_instructions, code);
-
-  if ((!found_exit && num_inst > 0) || block_size == 1)
-  {
-    // We couldn't find an exit
-    block->m_broken = true;
-  }
 
   auto& power_pc = system.GetPowerPC();
   auto& ppc_symbol_db = power_pc.GetSymbolDB();
@@ -1010,7 +1000,9 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
     const auto ppc_mode = power_pc.GetMode();
     const bool hle = !!HLE::TryReplaceFunction(ppc_symbol_db, op.address, ppc_mode);
     const bool breakpoint = power_pc.GetBreakPoints().IsAddressBreakPoint(op.address);
-    const bool may_exit_block = hle || breakpoint || op.canEndBlock || op.canCauseException;
+    const bool may_exit_block = hle || breakpoint ||
+                                op.instructionContinues != InstructionContinue::Always ||
+                                op.canCauseException;
 
     const bool opWantsFPRF = op.wantsFPRF;
     const bool opWantsCA = op.wantsCA;
@@ -1056,7 +1048,7 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
       fprDiscardable = BitSet32{};
       crDiscardable = BitSet8{};
     }
-    else if (op.canEndBlock || op.canCauseException)
+    else if (op.instructionContinues != InstructionContinue::Always || op.canCauseException)
     {
       gprDiscardable = BitSet32{};
       fprDiscardable = BitSet32{};
@@ -1168,7 +1160,6 @@ u32 PPCAnalyzer::Analyze(u32 address, CodeBlock* block, CodeBuffer* buffer,
   block->m_gqr_used = gqrUsed;
   block->m_gqr_modified = gqrModified;
   block->m_gpr_inputs = gprWillBeRead;
-  return address;
 }
 
 }  // namespace PPCAnalyst
