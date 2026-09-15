@@ -114,6 +114,7 @@ protected:
     std::array<u32, 8> constantGqr;
     bool firstFPInstructionFound;
     u32 skipInstructions;
+    bool wroteUnconditionalExit;
     CarryFlag carryFlag;
 
     bool generatingTrampoline = false;
