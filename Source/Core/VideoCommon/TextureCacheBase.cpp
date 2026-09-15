@@ -11,9 +11,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#if defined(_M_X86_64)
-#include <pmmintrin.h>
-#endif
 
 #include <fmt/format.h>
 
@@ -2627,14 +2624,25 @@ void TextureCacheBase::UninitializeEFBMemory(u8* dst, u32 stride, u32 bytes_per_
   // Hack: Most games don't actually need the correct texture data in RAM
   //       and we can just keep a copy in VRAM. We zero the memory so we
   //       can check it hasn't changed before using our copy in VRAM.
-  u8* ptr = dst;
-  for (u32 i = 0; i < num_blocks_y; i++)
+  if (bytes_per_row == stride)
   {
-    std::memset(ptr, 0, bytes_per_row);
-    ptr += stride;
+    std::ranges::fill_n(dst, bytes_per_row * num_blocks_y, 0);
+  }
+  else
+  {
+    u8* ptr = dst;
+    for (u32 i = 0; i < num_blocks_y; i++)
+    {
+      std::ranges::fill_n(ptr, bytes_per_row, 0);
+      ptr += stride;
+    }
   }
 }
 
+// This is the only way for GCC to compile the loop non-naively with -O2, without using intrinsics.
+// https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCDSAA6oCoRODB7evnoJSY4CQSHhLFEx0naYDilCBEzEBGk%2Bfly2mPY5DJXVBHlhkdGxtlU1dRmNCgOdwd2FvZIAlLaoXsTI7BzmAMzByN5YANQma25iwCSECCz72CYaAILrm9uYewcRhBdXt2YbDFteu/tuyFG%2BEEbxu7y8SSMOy8AA4ngARHZAkAgLzBAgwgD6BH2VhuEOCwGhXAAbAikQR0Ci0YJSdjceDIUSvGszOTkaj0az6Ws8dcCVCvCTJOzKdT0cKeXz3ncqFgqDtMZiAOKhORuJXvJVMAgEYh4CJeAiYJVQVBxRwsPAAL0wEHMZgAtFQvAxiJ5aI7aKhzQoHaQ9mYnVQ9ZhMI6AG5lIj620OmYJmWfVx4KjvCOoPDoHZyBjBZJiG2YACymBYJAAnkI8Cw4vQILCAFQ7dCjAMstmjfVYdusnYRCvGhSYuLRTHugDupHeO1nc/nC8XS%2BXK47OwYPkxEW9yAA1sOKzMZQB2PmztAMUbQuEDocmACsFjMD8R%2B1fp40qg0jR2n4AYpcx7wgyNzngIV5eKSOxxDqxrEAwopUiALwEJioijP8kEkhcEC3pgChHryM47BeEF9kktrknhw6jsQ46oBOOwAPRIkWqBUA2pKEWeOypjsuGDvhI5jpOCJvhS3aYEeoF7KexGzlhzbGqorYEOSxCYOi0RxBpqHoTiByKThqncfJFJITQtC0JiDAQMpqkBhRjzNhuLBbju%2B6YhWAYwbq0QMKZMkmEBxHNEoxHBTxs78MQ/Frng5IaLivFPG466btuqB7geyV4NY1jSdc86RWZCmks2k6qepmmCNpuloUwGGGeVxmjIFRULhylnWbZlVtqxto%2BbB/ntYuVX5WsiJdlmmAgR1s7BcBQUhWCK3XBwcy0Jw968H4HBaKQqCcG4%2BWWEiCxLI86w8KQBCaBtcy7iAZgwgAdPeawwpIGgkh9MIaMeACcaxrPonCSLwLASBoGikHtB1HRwvAKCAsN3ftG2kHAsBIGgtZ0NE5CUHjcQEzEWyGMA2LEK6u58HQcEo7h92kC8zDEBWnA3Wz1QVgA8hE2jRlzvB42wgh8wwtCcxjpBYIawCHFZKPcLwWAsJT4iy/gGnlFGKsHZgqhlEaKw3VpW2y7QBrELzHhYCzeo1iLpBRsQESJJg8JlprhL3XMVAGMACgAGp4JgE586Oe03fwggiGI7BSDIgiKCo6iy7ojQGEYKCnTY1sRCjkBzOarQq46fNmLwqBu5JxdQMwbAgECbuu2IXjsKYljWJ8CZNC0KQuAw7iePU/gj10BRFJkiTJAIQwNKQWTzwwU89DEIzNNGFRjIveilOUAjtDU69TJv/QdPvIxjGfM9cHMCgXcsEibdtu0s4jOyqDCJKOsKJEc5EjsjTBgu4Zj8VwIQEggY1gP14OjLQ/cnpmEkK9DQZh7yAxJADe8MI1jCmwceMGHAIZw0/pwZGqNbr%2ByxjARAKBUD43oGQCgEASZkxAMAUkZh6a0EZpQCILMeYcxdiI/mgthaq1IGLRgBBJbSxZvLLwisxC0BVjddWmsVgHR1jvfWLMjYm2NC7C2LNC62w5vbHRCD9RQ2kW7D2ShvYayMNbXOGMA5B1DuHSO0cXZx2EKIcQydAlpzUCzXQvCgF5x7pYfQBoG6lwtCkCuVca51xmg3CATd2Ct0JhGDuXd8590ftvI%2BfgICuGvqQQIExp69EaCvVoNTmkpDvo0geO9j57zHsMLpFST7jHyBvA%2BvT0hL1GB0Dpm9H7PyTqQCchh5EWgAJIMH4CLN%2BHAdrkNll/H%2Bf8AHAGQMgHYpJXpsggFAmMsD4E0M8Y9Z6aCYTYPvCSGEx4QZBn%2Blwe8JCyHwxrpQ2w1DEGY2xgwjhLCibsKYaTFhIAIzIDiHETEEYuCA0xAYIcqFVDCj4QI5mstxFiOCLzAWQsHAu1kRLKWMtdGYAVkrdRLstFuJsXLPAutHAGNlkY5AptTG1UtgdCxdsMCcqdvYm6jjPYuN9h4pBfBvFhwjlHRgATZAJxCdIMJSgImZxAKDGJ3crDxMLkkw6KTwIgCYlXQ6mSsDZNyS3SkbdCneGKXEiwOL8IEH7ofVow9R4TInugGZs9sgpFaXPVokat6Dx6VfPpkzymtCGQmy%2BgxU1jOmfU0ZD95iLBfkWy2uygWHU4N/ABLAFDIp2BiwGr0/VXmufgW510ZgIP9k8oM701iAx%2BoO48GhWTHmPKggFH99kgpRmjXtJDq57IRiC8F/c3ZJGcJIIAA%3D
+__attribute__((optimize("-funroll-loops", "-ftree-vectorize")))
+#endif
 void TextureCacheBase::UninitializeXFBMemory(u8* dst, u32 stride, u32 bytes_per_row,
                                              u32 num_blocks_y)
 {
@@ -2646,34 +2654,26 @@ void TextureCacheBase::UninitializeXFBMemory(u8* dst, u32 stride, u32 bytes_per_
   // (Y=1,U=254,V=254) instead of dark green (Y=0,U=0,V=0) in YUV
   // like is done in the EFB path.
 
-#if defined(_M_X86_64)
-  __m128i sixteenBytes = _mm_set1_epi16((s16)(u16)0xFE01);
-#endif
-
-  for (u32 i = 0; i < num_blocks_y; i++)
+  // GCC struggles to vectorize interleaved stores, so we must make a single u16.
+  const u8 bytes[2] = {0x01, 0xFE};
+  const u16 pattern = std::bit_cast<u16>(bytes);
+  const u32 size = bytes_per_row / sizeof(u16);
+  if (bytes_per_row == stride)
   {
-    u32 size = bytes_per_row;
-    u8* rowdst = dst;
-#if defined(_M_X86_64)
-    while (size >= 16)
+    u16* texdst = reinterpret_cast<u16*>(dst);
+    // On MSVC, a regular loop or std::ranges::fill_n might have a different codegen (and the only
+    // alternative is the naivest loop possible). According to Godbolt, with std::fill_n it prefers
+    // `rep stosw` instead, which is better.
+    std::fill_n(texdst, size * num_blocks_y, pattern);
+  }
+  else
+  {
+    for (u32 i = 0; i < num_blocks_y; i++)
     {
-      _mm_storeu_si128((__m128i*)rowdst, sixteenBytes);
-      size -= 16;
-      rowdst += 16;
+      u16* rowdst = reinterpret_cast<u16*>(dst);
+      std::fill_n(rowdst, size, pattern);
+      dst += stride;
     }
-#endif
-    for (u32 offset = 0; offset < size; offset++)
-    {
-      if (offset & 1)
-      {
-        rowdst[offset] = 254;
-      }
-      else
-      {
-        rowdst[offset] = 1;
-      }
-    }
-    dst += stride;
   }
 }
 
