@@ -133,14 +133,34 @@ class RunningMean
 public:
   constexpr void Clear() { *this = {}; }
 
-  constexpr void Push(T x) { m_mean = m_mean + (x - m_mean) / ++m_count; }
+  constexpr void Push(T x)
+  {
+    m_total += x;
+    ++m_count;
+  }
+  constexpr void Pop(T x)
+  {
+    if (m_count <= 1)
+    {
+      Clear();
+      return;
+    }
+    m_total -= x;
+    --m_count;
+  }
 
   constexpr size_t Count() const { return m_count; }
-  constexpr T Mean() const { return m_mean; }
+  constexpr T Mean() const
+  {
+    if (m_count == 0)
+      return {};
+    return m_total / m_count;
+  }
+  constexpr T Total() const { return m_total; }
 
 private:
   size_t m_count = 0;
-  T m_mean{};
+  T m_total{};
 };
 
 template <typename T>
@@ -155,9 +175,22 @@ public:
     m_running_mean.Push(x);
     m_variance += (x - old_mean) * (x - m_running_mean.Mean());
   }
+  constexpr void Pop(T x)
+  {
+    if (m_running_mean.Count() <= 1)
+    {
+      Clear();
+      return;
+    }
+
+    const T old_mean = m_running_mean.Mean();
+    m_running_mean.Pop(x);
+    m_variance -= (x - old_mean) * (x - m_running_mean.Mean());
+  }
 
   constexpr size_t Count() const { return m_running_mean.Count(); }
   constexpr T Mean() const { return m_running_mean.Mean(); }
+  constexpr T Total() const { return m_running_mean.Total(); }
 
   constexpr T Variance() const { return m_variance / (Count() - 1); }
   T StandardDeviation() const { return std::sqrt(Variance()); }

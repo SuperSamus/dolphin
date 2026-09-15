@@ -44,7 +44,6 @@ public:
 private:
   void LogRenderTimeToFile(DT val);
 
-  void HandleRawDt(DT value);
   void PushFront(DT value);
   void PopBack();
 
@@ -65,7 +64,7 @@ private:
   const std::optional<DT> m_sample_window_duration;
 
   // Queue + Running Total used to calculate average dt
-  DT m_dt_total = DT::zero();
+  MathUtil::RunningVariance<DT::rep> m_running_variance{};
   std::deque<DT> m_dt_queue;
 
   // Average rate/time throughout the window
