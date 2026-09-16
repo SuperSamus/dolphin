@@ -252,13 +252,11 @@ bool JitBase::HandleStackFault()
   UnprotectStack();
   m_enable_blr_optimization = false;
 
-  // We're going to need to clear the whole cache to get rid of the bad
-  // CALLs, but we can't yet.  Fake the downcount so we're forced to the
-  // dispatcher (no block linking), and clear the cache so we're sent to
-  // Jit. In the case of Windows, we will also need to call _resetstkoflw()
-  // to reset the guard page.
+  // We're going to need to clear the whole cache to get rid of the bad CALLs, but we can't yet.
+  // Fake the downcount so we're forced to the dispatcher (and not to a linked block). In the case
+  // of Windows, we will also need to call _resetstkoflw() to reset the guard page.
   // Yeah, it's kind of gross.
-  GetBlockCache()->Clear();
+  ClearCache(false);
   m_system.GetCoreTiming().ForceExceptionCheck(0);
   m_cleanup_after_stackfault = true;
 

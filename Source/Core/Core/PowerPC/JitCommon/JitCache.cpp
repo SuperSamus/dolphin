@@ -93,8 +93,6 @@ void JitBaseBlockCache::Shutdown()
   m_entry_points_arena.Release();
 }
 
-// This clears the JIT cache. It's called from JitCache.cpp when the JIT cache
-// is full and when saving and loading states.
 void JitBaseBlockCache::Clear()
 {
 #if defined(_DEBUG) || defined(DEBUGFAST)
@@ -103,10 +101,6 @@ void JitBaseBlockCache::Clear()
   m_jit.js.fifoWriteAddresses.clear();
   m_jit.js.pairedQuantizeAddresses.clear();
   m_jit.js.noSpeculativeConstantsAddresses.clear();
-  for (auto& e : block_map)
-  {
-    DestroyBlock(e.second);
-  }
   block_map.clear();
   links_to.clear();
   block_range_map.clear();
@@ -496,7 +490,9 @@ void JitBaseBlockCache::LinkBlock(JitBlock& block)
 
 void JitBaseBlockCache::UnlinkBlock(const JitBlock& block)
 {
-  // Unlink all exits of this block.
+  // Unlink all exits of this block, because we may be inside the block when destroyed.
+  // TODO: Would it be worth to instead make sure that a block is guaranteed to exit by itself if it
+  // self-destructs?
   for (auto& e : block.linkData)
   {
     WriteLinkBlock(e, nullptr);

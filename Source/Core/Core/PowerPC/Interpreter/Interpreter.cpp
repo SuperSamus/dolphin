@@ -314,7 +314,7 @@ void Interpreter::unknown_instruction(Interpreter& interpreter, UGeckoInstructio
     system.GetCPU().Break();
 }
 
-void Interpreter::ClearCache()
+void Interpreter::ClearCache(bool poison)
 {
   // Do nothing.
 }

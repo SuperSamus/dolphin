@@ -239,7 +239,7 @@ void JitInterface::ClearCache(const Core::CPUThreadGuard&)
 void JitInterface::ClearSafe()
 {
   if (m_jit)
-    m_jit->GetBlockCache()->Clear();
+    m_jit->ClearCache(false);
 }
 
 void JitInterface::EraseSingleBlock(const JitBlock& block)

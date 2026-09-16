@@ -62,9 +62,10 @@ public:
 
   // Always clear code space with breakpoints, so that if someone accidentally executes
   // uninitialized, it just breaks into the debugger.
-  void ClearCodeSpace()
+  void ClearCodeSpace(bool poison_memory = true)
   {
-    PoisonMemory();
+    if (poison_memory)
+      PoisonMemory();
     ResetCodePtr();
   }
 

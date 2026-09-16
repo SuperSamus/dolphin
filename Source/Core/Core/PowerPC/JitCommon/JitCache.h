@@ -156,6 +156,8 @@ public:
 
   virtual void Init();
   void Shutdown();
+  // Meant to be called by individual JIT while they also clear their stuff, because for performance
+  // reasons it does not call DestroyBlock for each block.
   void Clear();
   void Reset();
 

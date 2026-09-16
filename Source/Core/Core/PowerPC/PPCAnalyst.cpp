@@ -227,6 +227,13 @@ InstructionContinue CanEndBlock(const CodeOp& op)
       {
         return InstructionContinue::Never;
       }
+      // TODO above: check if the MMCR actually changed, instead of always exiting.
+      // They may wipe the entire instruction cache.
+      if ((GetSPRIndex(inst) >= SPR_IBAT0U && GetSPRIndex(inst) <= SPR_DBAT7L) ||
+          GetSPRIndex(inst) == SPR_HID0 || GetSPRIndex(inst) == SPR_HID4)
+      {
+        return InstructionContinue::Maybe;
+      }
       return InstructionContinue::Always;
     }
     // Conditional branches
