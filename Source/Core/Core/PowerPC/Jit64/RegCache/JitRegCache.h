@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <variant>
 
+#include "Common/VariantUtil.h"
 #include "Common/x64Emitter.h"
 #include "Core/PowerPC/Jit64/RegCache/RCMode.h"
 
@@ -28,12 +29,22 @@ using BitSetGuest = BitSet32;
 class RCOpArg
 {
 public:
-  static RCOpArg Imm32(u32 imm);
-  static RCOpArg R(Gen::X64Reg xr);
-  RCOpArg();
-  ~RCOpArg();
-  RCOpArg(RCOpArg&&) noexcept;
-  RCOpArg& operator=(RCOpArg&&) noexcept;
+  static RCOpArg Imm32(u32 imm) { return RCOpArg{imm}; }
+  static RCOpArg R(Gen::X64Reg hr) { return RCOpArg{hr}; }
+  RCOpArg() = default;
+  ~RCOpArg() { Unlock(); }
+  RCOpArg(RCOpArg&& other) noexcept
+      : rc(std::exchange(other.rc, nullptr)),
+        contents(std::exchange(other.contents, std::monostate{}))
+  {
+  }
+  RCOpArg& operator=(RCOpArg&& other) noexcept
+  {
+    Unlock();
+    rc = std::exchange(other.rc, nullptr);
+    contents = std::exchange(other.contents, std::monostate{});
+    return *this;
+  }
 
   RCOpArg(RCX64Reg&&) noexcept;
   RCOpArg& operator=(RCX64Reg&&) noexcept;
@@ -59,8 +70,8 @@ public:
 private:
   friend class RegCache;
 
-  explicit RCOpArg(u32 imm);
-  explicit RCOpArg(Gen::X64Reg xr);
+  explicit RCOpArg(u32 imm) : rc(nullptr), contents(imm) {}
+  explicit RCOpArg(Gen::X64Reg hr) : rc(nullptr), contents(hr) {}
   RCOpArg(RegCache* rc_, preg_t preg);
 
   RegCache* rc = nullptr;
@@ -70,16 +81,27 @@ private:
 class RCX64Reg
 {
 public:
-  RCX64Reg();
-  ~RCX64Reg();
-  RCX64Reg(RCX64Reg&&) noexcept;
-  RCX64Reg& operator=(RCX64Reg&&) noexcept;
+  RCX64Reg() = default;
+  ~RCX64Reg() { Unlock(); }
+  RCX64Reg(RCX64Reg&& other) noexcept
+      : rc(std::exchange(other.rc, nullptr)),
+        contents(std::exchange(other.contents, std::monostate{}))
+  {
+  }
+
+  RCX64Reg& operator=(RCX64Reg&& other) noexcept
+  {
+    Unlock();
+    rc = std::exchange(other.rc, nullptr);
+    contents = std::exchange(other.contents, std::monostate{});
+    return *this;
+  }
 
   RCX64Reg(const RCX64Reg&) = delete;
   RCX64Reg& operator=(const RCX64Reg&) = delete;
 
   void Realize();
-  operator Gen::OpArg() const&;
+  operator Gen::OpArg() const& { return Gen::R(operator Gen::X64Reg()); }
   operator Gen::X64Reg() const&;
   operator Gen::OpArg() const&& = delete;
   operator Gen::X64Reg() const&& = delete;
@@ -123,7 +145,10 @@ class RCForkGuard
 {
 public:
   ~RCForkGuard() { EndFork(); }
-  RCForkGuard(RCForkGuard&&) noexcept;
+  RCForkGuard(RCForkGuard&& other) noexcept : rc(other.rc), m_state(other.m_state)
+  {
+    other.rc = nullptr;
+  }
 
   RCForkGuard(const RCForkGuard&) = delete;
   RCForkGuard& operator=(const RCForkGuard&) = delete;
@@ -376,10 +401,14 @@ public:
     m_guests_constraints.AddRevertableBind(preg, mode);
     return RCX64Reg{this, preg};
   }
-  RCX64Reg Scratch();
-  RCX64Reg Scratch(Gen::X64Reg xr);
+  RCX64Reg Scratch() { return Scratch(GetFreeXReg()); }
+  RCX64Reg Scratch(Gen::X64Reg xr)
+  {
+    FlushX(xr);
+    return RCX64Reg{this, xr};
+  }
 
-  RCForkGuard Fork();
+  RCForkGuard Fork() { return RCForkGuard{*this}; }
   void Discard(BitSetGuest pregs);
   void Flush(BitSetGuest pregs = BitSetGuest::AllTrue(), FlushMode mode = FlushMode::Full,
              IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
@@ -437,3 +466,142 @@ protected:
   RegsState m_state{};
   RCConstraints m_guests_constraints{};
 };
+
+inline RCOpArg::RCOpArg(RCX64Reg&& other) noexcept
+    : rc(std::exchange(other.rc, nullptr)),
+      contents(VariantCast(std::exchange(other.contents, std::monostate{})))
+{
+}
+
+inline RCOpArg::RCOpArg(RegCache* rc_, preg_t preg) : rc(rc_), contents(preg)
+{
+  rc->Lock(preg);
+}
+
+inline RCOpArg& RCOpArg::operator=(RCX64Reg&& other) noexcept
+{
+  Unlock();
+  rc = std::exchange(other.rc, nullptr);
+  contents = VariantCast(std::exchange(other.contents, std::monostate{}));
+  return *this;
+}
+
+inline void RCOpArg::Realize()
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    rc->Realize(*preg);
+  }
+}
+
+inline Gen::OpArg RCOpArg::Location() const
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    ASSERT(rc->IsRealized(*preg));
+    return rc->R(*preg);
+  }
+  else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+  {
+    return Gen::R(*xr);
+  }
+  else if (const u32* imm = std::get_if<u32>(&contents))
+  {
+    return Gen::Imm32(*imm);
+  }
+  ASSERT(false);
+  return {};
+}
+
+inline void RCOpArg::Unlock()
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    ASSERT(rc);
+    rc->Unlock(*preg);
+  }
+  else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+  {
+    // If rc, we got this from an RCX64Reg.
+    // If !rc, we got this from RCOpArg::R.
+    if (rc)
+      rc->UnlockX(*xr);
+  }
+  else
+  {
+    ASSERT(!rc);
+  }
+
+  rc = nullptr;
+  contents = std::monostate{};
+}
+
+inline RCX64Reg::RCX64Reg(RegCache* rc_, preg_t preg) : rc(rc_), contents(preg)
+{
+  rc->Lock(preg);
+}
+
+inline RCX64Reg::RCX64Reg(RegCache* rc_, Gen::X64Reg xr) : rc(rc_), contents(xr)
+{
+  rc->LockX(xr);
+}
+
+inline void RCX64Reg::Realize()
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    rc->Realize(*preg);
+  }
+}
+
+inline RCX64Reg::operator Gen::X64Reg() const&
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    ASSERT(rc->IsRealized(*preg));
+    return rc->RX(*preg);
+  }
+  else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+  {
+    return *xr;
+  }
+  ASSERT(false);
+  return {};
+}
+
+inline void RCX64Reg::Unlock()
+{
+  if (const preg_t* preg = std::get_if<preg_t>(&contents))
+  {
+    ASSERT(rc);
+    rc->Unlock(*preg);
+  }
+  else if (const Gen::X64Reg* xr = std::get_if<Gen::X64Reg>(&contents))
+  {
+    ASSERT(rc);
+    rc->UnlockX(*xr);
+  }
+  else
+  {
+    ASSERT(!rc);
+  }
+
+  rc = nullptr;
+  contents = std::monostate{};
+}
+
+inline RCForkGuard::RCForkGuard(RegCache& rc_) : rc(&rc_), m_state(rc_.m_state)
+{
+  ASSERT(!rc->IsAnyConstraintActive());
+}
+
+inline void RCForkGuard::EndFork()
+{
+  if (!rc)
+    return;
+
+  ASSERT(!rc->IsAnyConstraintActive());
+
+  rc->m_state = m_state;
+  rc = nullptr;
+}
