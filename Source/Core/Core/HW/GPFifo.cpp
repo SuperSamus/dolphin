@@ -107,7 +107,10 @@ void GPFifoManager::UpdateGatherPipe()
   }
 
   // move back the spill bytes
-  memmove(m_gather_pipe, m_gather_pipe + processed, pipe_count);
+  // Use a constant size so that the compiler can optimize it to a couple of instructions.
+  // (Except MSVC last I checked, because it does this only with memcpy specifically, which would
+  // require adding `if (processed > 0)` because it can't overlap. What a great compiler...)
+  std::memmove(m_gather_pipe, m_gather_pipe + processed, /*pipe_count*/ GATHER_PIPE_SIZE);
   SetGatherPipeCount(pipe_count);
 }
 
