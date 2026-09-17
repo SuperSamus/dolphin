@@ -292,11 +292,12 @@ constexpr std::array<GekkoOPTemplate, 107> s_table31{{
     {824, "srawix", OpType::Integer, 1, FL_OUT_A | FL_IN_S | FL_SET_CA | FL_RC_BIT},
     {24, "slwx", OpType::Integer, 1, FL_OUT_A | FL_IN_SB | FL_RC_BIT},
 
-    {54, "dcbst", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE},
-    {86, "dcbf", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE},
+    {54, "dcbst", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE | FL_ENDBLOCK},
+    {86, "dcbf", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE | FL_ENDBLOCK},
     {246, "dcbtst", OpType::DataCache, 2, 0},
     {278, "dcbt", OpType::DataCache, 2, 0},
-    {470, "dcbi", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE | FL_PROGRAMEXCEPTION},
+    {470, "dcbi", OpType::DataCache, 5,
+     FL_IN_A0B | FL_LOADSTORE | FL_PROGRAMEXCEPTION | FL_ENDBLOCK},
     {758, "dcba", OpType::DataCache, 5, 0},
     {1014, "dcbz", OpType::DataCache, 5, FL_IN_A0B | FL_LOADSTORE},
 
@@ -379,6 +380,8 @@ constexpr std::array<GekkoOPTemplate, 107> s_table31{{
 
     {4, "tw", OpType::System, 2, FL_IN_AB | FL_ENDBLOCK},
     {598, "sync", OpType::System, 3, 0},
+    // Ending the block immediately isn't accurate, as the pipeline isn't flushed yet (it's
+    // guaranteed with isync)
     {982, "icbi", OpType::System, 4, FL_IN_A0B | FL_ENDBLOCK | FL_LOADSTORE},
 
     // Unused instructions on GC

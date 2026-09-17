@@ -97,6 +97,11 @@ public:
   // Utilities for use by opcodes
 
   void EmitUpdateMembase();
+  // Prepare for InvalidateICacheLine(s). That function is the only thing that sets
+  // PPCSTATE(cur_jit_block) back to nullptr, so make sure it's guaranteed to be called.
+  // Clobbers RSCRATCH2.
+  // TODO: The state should have the PC instead.
+  void EmitCurBlockToPPCState();
   void MSRUpdated(const Gen::OpArg& msr, Gen::X64Reg scratch_reg);
   void FakeBLCall(u32 after);
   void WriteExit(u32 destination, bool bl = false, u32 after = 0, bool link = true);
@@ -271,6 +276,9 @@ public:
 
   void eieio(UGeckoInstruction inst);
 
+  // TODO: Unnecessary after the change
+  void icbi(UGeckoInstruction inst);
+
 private:
   void CompileInstruction(PPCAnalyst::CodeOp& op);
 
@@ -283,7 +291,7 @@ private:
 
   static void ImHere(Jit64& jit);
 
-  JitBlockCache blocks{*this};
+  JitBlockCache blocks{*this, *this};
   TrampolineCache trampolines{*this};
 
   GPRRegCache gpr{*this};

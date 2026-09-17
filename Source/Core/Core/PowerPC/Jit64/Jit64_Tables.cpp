@@ -279,9 +279,10 @@ constexpr std::array<Jit64OpTemplate, 107> s_table31{{
     {595, &Jit64::FallBackToInterpreter},  // mfsr
     {659, &Jit64::FallBackToInterpreter},  // mfsrin
 
-    {4, &Jit64::twX},                      // tw
-    {598, &Jit64::DoNothing},              // sync
-    {982, &Jit64::FallBackToInterpreter},  // icbi
+    {4, &Jit64::twX},          // tw
+    {598, &Jit64::DoNothing},  // sync
+    // TODO: Unnecessary after the change
+    {982, &Jit64::icbi},       // icbi
 
     // Unused instructions on GC
     {310, &Jit64::FallBackToInterpreter},  // eciwx

@@ -109,6 +109,8 @@ void JitBaseBlockCache::Clear()
 
   if (m_entry_points_ptr)
     m_entry_points_arena.Clear();
+  else
+    m_fast_block_map_fallback.fill(nullptr);
 }
 
 void JitBaseBlockCache::Reset()
@@ -280,18 +282,30 @@ const u8* JitBaseBlockCache::Dispatch()
   return block->normalEntry;
 }
 
-void JitBaseBlockCache::InvalidateICacheLine(u32 address)
+// Note: the JIT itself does a BAT translation before calling this, yet passes the effective address
+// because it doesn't do a page table translation.
+bool JitBaseBlockCache::InvalidateICacheLine(u32 address)
 {
   const u32 cache_line_address = address & ~0x1f;
   const auto translated = m_jit.m_mmu.JitCache_TranslateAddress(cache_line_address);
   if (translated.valid)
+  {
+    auto& current_jit_block = m_jit.m_system.GetPPCState().current_jit_block;
+    const bool is_self_deleting =
+        current_jit_block && current_jit_block->OverlapsPhysicalRange(translated.address, 32);
+    current_jit_block = nullptr;
     InvalidateICacheInternal(translated.address, cache_line_address, 32);
+    return is_self_deleting;
+  }
+  return false;
 }
 
-void JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length)
+bool JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length)
 {
-  u32 address = initial_address;
+  u32 address = initial_address & ~0x1f;
   u32 length = initial_length;
+  auto& current_jit_block = m_jit.m_system.GetPPCState().current_jit_block;
+  bool is_self_deleting = false;
   while (length > 0)
   {
     const auto translated = m_jit.m_mmu.JitCache_TranslateAddress(address);
@@ -304,17 +318,27 @@ void JitBaseBlockCache::InvalidateICache(u32 initial_address, u32 initial_length
     if ((first_address & mask) == (last_address & mask))
     {
       if (translated.valid)
+      {
+        is_self_deleting |=
+            current_jit_block && current_jit_block->OverlapsPhysicalRange(translated.address, 32);
         InvalidateICacheInternal(translated.address, address, length);
-      return;
+      }
+      current_jit_block = nullptr;
+      return is_self_deleting;
     }
 
     const u32 end_of_page = (first_address + (1u << shift)) & mask;
     const u32 length_this_page = end_of_page - first_address;
     if (translated.valid)
+    {
+      is_self_deleting |=
+          current_jit_block && current_jit_block->OverlapsPhysicalRange(translated.address, 32);
       InvalidateICacheInternal(translated.address, address, length_this_page);
+    }
     address = address + length_this_page;
     length = length - length_this_page;
   }
+  return false;
 }
 
 void JitBaseBlockCache::InvalidateICacheInternal(u32 physical_address, u32 address, u32 length)

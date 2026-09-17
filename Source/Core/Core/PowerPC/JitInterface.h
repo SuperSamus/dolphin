@@ -86,15 +86,15 @@ public:
 
   // A range of addresses may have been modified.
   // The passed address does not automatically align to the cache line.
-  void InvalidateICache(u32 address, u32 size);
+  bool InvalidateICache(u32 address, u32 size);
   // A cache line may have been modified.
-  void InvalidateICacheLine(u32 address);
+  bool InvalidateICacheLine(u32 address);
   // Multiple cache lines may have been modified.
-  void InvalidateICacheLines(u32 address, u32 count);
+  bool InvalidateICacheLines(u32 address, u32 count);
   // No instruction was modified, but the blocks containing this instruction need to be erased.
   void EraseBlocksWithInstruction(u32 address);
-  static void InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address);
-  static void InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count);
+  static bool InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address);
+  static bool InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count);
 
   enum class ExceptionType
   {

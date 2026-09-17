@@ -21,10 +21,13 @@ class Mapping;
 }
 
 class Jit64;
+class JitBlockCache;
 
 // Like XCodeBlock but has some utilities for memory access.
 class EmuCodeBlock : public Gen::X64CodeBlock
 {
+  friend class JitBlockCache;
+
 public:
   explicit EmuCodeBlock(Jit64& jit) : m_jit{jit} {}
   void MemoryExceptionCheck();

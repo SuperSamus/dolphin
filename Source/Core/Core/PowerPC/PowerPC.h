@@ -194,6 +194,13 @@ struct PowerPCState
   InstructionCache iCache;
   Cache dCache;
 
+  // Read with instructions like icbi, to check if the block it's called from is destroyed (in that
+  // case, it exits to dispatch ASAP). Written by the JIT only if it's guranteed that it's set back
+  // to nullptr by the function that needs it.
+  // TODO: Better to replace it with the PC instead, and let the analyzer check when it needs to be
+  // set.
+  JitBlock* current_jit_block = nullptr;
+
   void UpdateCR1()
   {
     cr.SetField(1, (fpscr.FX << 3) | (fpscr.FEX << 2) | (fpscr.VX << 1) | fpscr.OX);

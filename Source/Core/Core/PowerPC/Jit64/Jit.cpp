@@ -538,6 +538,12 @@ void Jit64::FakeBLCall(u32 after)
   SetJumpTarget(skip_exit);
 }
 
+void Jit64::EmitCurBlockToPPCState()
+{
+  MOV(64, R(RSCRATCH2), ImmPtr(js.curBlock));
+  MOV(64, PPCSTATE(current_jit_block), R(RSCRATCH2));
+}
+
 void Jit64::EmitUpdateMembase()
 {
   MOV(64, R(RMEM), PPCSTATE(mem_ptr));

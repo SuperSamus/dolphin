@@ -131,6 +131,7 @@ protected:
 
     JitBlock* curBlock;
 
+    // Flags on whether a block starting from that address should be compiled in a special way.
     std::unordered_set<u32> fifoWriteAddresses;
     std::unordered_set<u32> pairedQuantizeAddresses;
     std::unordered_set<u32> noSpeculativeConstantsAddresses;

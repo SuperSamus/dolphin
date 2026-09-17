@@ -7,7 +7,8 @@
 #include "Common/x64Emitter.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 
-JitBlockCache::JitBlockCache(JitBase& jit) : JitBaseBlockCache{jit}
+JitBlockCache::JitBlockCache(JitBase& jit, EmuCodeBlock& emu_code_block)
+    : JitBaseBlockCache{jit}, m_emu_code_block(emu_code_block)
 {
 }
 
@@ -60,6 +61,11 @@ void JitBlockCache::DestroyBlock(JitBlock& block)
 {
   JitBaseBlockCache::DestroyBlock(block);
 
+  // Even if the JIT is in the block being cleared, erasing now is perfectly safe: the only thing
+  // that can allocate a new block that replaces the current one is the dispatcher, and if the JIT
+  // is in the dispatcher, it's not in the block anymore.
+  // TODO: Actually implement the comment above. (And remove all the support for delegating.)
+  // TODO: Do we want this?
   if (block.near_begin != block.near_end)
     m_ranges_to_free_on_next_codegen_near.emplace_back(block.near_begin, block.near_end);
   if (block.far_begin != block.far_end)

@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "Common/Align.h"
 #include "Common/Assert.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
@@ -269,19 +270,21 @@ std::size_t JitInterface::DisassembleFarCode(const JitBlock& block, std::ostream
   return 0;
 }
 
-void JitInterface::InvalidateICache(u32 address, u32 size)
+bool JitInterface::InvalidateICache(u32 address, u32 size)
 {
   if (m_jit)
-    m_jit->GetBlockCache()->InvalidateICache(address, size);
+    return m_jit->GetBlockCache()->InvalidateICache(address, size);
+  return false;
 }
 
-void JitInterface::InvalidateICacheLine(u32 address)
+bool JitInterface::InvalidateICacheLine(u32 address)
 {
   if (m_jit)
-    m_jit->GetBlockCache()->InvalidateICacheLine(address);
+    return m_jit->GetBlockCache()->InvalidateICacheLine(address);
+  return false;
 }
 
-void JitInterface::InvalidateICacheLines(u32 address, u32 count)
+bool JitInterface::InvalidateICacheLines(u32 address, u32 count)
 {
   // This corresponds to a PPC code loop that:
   // - calls some form of dcb* instruction on 'address'
@@ -290,10 +293,11 @@ void JitInterface::InvalidateICacheLines(u32 address, u32 count)
   // - jumps back to the dcb* instruction if 'count' != 0
   // with an extra optimization for the case of a single cache line invalidation
   if (count == 1)
-    InvalidateICacheLine(address);
+    return InvalidateICacheLine(address);
+
   const u32 size =
       count == 0 || count >= static_cast<u32>(0x1'0000'0000 / 32) ? 0xffffffff : 32 * count;
-  InvalidateICache(address & ~0x1f, size);
+  return InvalidateICache(Common::AlignDown(address, 32), size);
 }
 
 void JitInterface::EraseBlocksWithInstruction(u32 address)
@@ -302,14 +306,14 @@ void JitInterface::EraseBlocksWithInstruction(u32 address)
     m_jit->GetBlockCache()->EraseBlocksWithInstruction(address);
 }
 
-void JitInterface::InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address)
+bool JitInterface::InvalidateICacheLineFromJIT(JitInterface& jit_interface, u32 address)
 {
-  jit_interface.InvalidateICacheLine(address);
+  return jit_interface.InvalidateICacheLine(address);
 }
 
-void JitInterface::InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count)
+bool JitInterface::InvalidateICacheLinesFromJIT(JitInterface& jit_interface, u32 address, u32 count)
 {
-  jit_interface.InvalidateICacheLines(address, count);
+  return jit_interface.InvalidateICacheLines(address, count);
 }
 
 void JitInterface::CompileExceptionCheck(ExceptionType type)
@@ -351,7 +355,12 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
 
     // Invalidate the JIT block so that it gets recompiled with the external exception check
     // included.
-    EraseBlocksWithInstruction(ppc_state.pc);
+    if (type != ExceptionType::FIFOWrite)
+    {
+      // TODO: Not a problem for NBA since that block is short-lived anyway, but needs a better
+      // solution for other games.
+      EraseBlocksWithInstruction(ppc_state.pc);
+    }
   }
 }
 

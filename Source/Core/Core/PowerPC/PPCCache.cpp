@@ -385,7 +385,7 @@ u32 InstructionCache::ReadInstruction(Memory::MemoryManager& memory,
   return Common::swap32(value);
 }
 
-void InstructionCache::Invalidate(Memory::MemoryManager& memory, JitInterface& jit_interface,
+bool InstructionCache::Invalidate(Memory::MemoryManager& memory, JitInterface& jit_interface,
                                   u32 addr)
 {
   // Per the 750cl manual, section 3.4.1.5 Instruction Cache Enabling/Disabling (page 137)
@@ -411,7 +411,7 @@ void InstructionCache::Invalidate(Memory::MemoryManager& memory, JitInterface& j
   modified[set] = 0;
 
   // Also tell the JIT that the corresponding address has been invalidated
-  jit_interface.InvalidateICacheLine(addr);
+  return jit_interface.InvalidateICacheLine(addr);
 }
 
 void InstructionCache::RefreshConfig()

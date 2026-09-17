@@ -184,8 +184,8 @@ public:
   // assembly version.)
   const u8* Dispatch();
 
-  void InvalidateICache(u32 address, u32 length);
-  void InvalidateICacheLine(u32 address);
+  bool InvalidateICache(u32 address, u32 length);
+  bool InvalidateICacheLine(u32 address);
   void EraseBlocksWithInstruction(u32 address);
   void ErasePhysicalRange(u32 address, u32 length);
   void EraseSingleBlock(const JitBlock& block);
